@@ -130,8 +130,7 @@ function atualizarStatusAula(el, aula) {
   }
 }
 
-async function puxarTranscricao(aula, statusEl, rootEl) {
-  if (!aula.url) { toast('Cole o link do YouTube primeiro.', true); return; }
+async function puxarTranscricaoDados(aula) {
   try {
     const res = await fetch('api/transcript', {
       method: 'POST',
@@ -139,7 +138,7 @@ async function puxarTranscricao(aula, statusEl, rootEl) {
       body: JSON.stringify({ url: aula.url })
     });
     const ct = res.headers.get('content-type') || '';
-    if (!ct.includes('json')) throw new Error('Backend indisponível — este site precisa estar publicado no Cloudflare Pages (veja o README), ou cole a transcrição manualmente.');
+    if (!ct.includes('json')) throw new Error('Backend indisponível — este site precisa estar publicado no Cloudflare (veja o README), ou cole a transcrição manualmente.');
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     aula.texto = data.text;
@@ -147,15 +146,45 @@ async function puxarTranscricao(aula, statusEl, rootEl) {
     aula.auto = data.auto;
     aula.status = 'ok';
     aula.erro = '';
-    atualizarStatusAula(statusEl, aula);
-    rootEl.querySelector('.aula-texto').value = aula.texto;
-    rootEl.querySelector('.aula-titulo').value = aula.titulo;
+    return true;
   } catch (e) {
     aula.status = 'erro';
     aula.erro = e.message;
-    atualizarStatusAula(statusEl, aula);
-    rootEl.querySelector('.aula-manual').open = true;
+    return false;
   }
+}
+
+async function puxarTranscricao(aula, statusEl, rootEl) {
+  if (!aula.url) { toast('Cole o link do YouTube primeiro.', true); return; }
+  await puxarTranscricaoDados(aula);
+  atualizarStatusAula(statusEl, aula);
+  rootEl.querySelector('.aula-texto').value = aula.texto || '';
+  rootEl.querySelector('.aula-titulo').value = aula.titulo || '';
+  if (aula.status === 'erro') rootEl.querySelector('.aula-manual').open = true;
+}
+
+/* Puxa sozinho a transcrição de toda aula que tem link mas ainda não tem texto */
+async function garantirTranscricoes() {
+  const pendentes = projeto.aulas.filter(a => a.url && a.url.trim() && (!a.texto || a.texto.trim().length <= 50));
+  if (!pendentes.length) return true;
+
+  $('#statusGeracao').classList.remove('oculto');
+  $('#statusTitulo').textContent = 'Extraindo transcrições do YouTube…';
+  $('#statusDetalhe').textContent = `${pendentes.length} aula(s) — isso leva alguns segundos`;
+  try {
+    await Promise.all(pendentes.map(a => puxarTranscricaoDados(a)));
+  } finally {
+    $('#statusGeracao').classList.add('oculto');
+  }
+  desenharAulas();
+  salvar();
+
+  const falhas = pendentes.filter(a => a.status === 'erro');
+  if (falhas.length) {
+    toast(`Não consegui extrair a transcrição de ${falhas.length} aula(s) — ${falhas[0].erro || ''} Nessas aulas, abra “colar transcrição manualmente”.`, true, 11000);
+    return false;
+  }
+  return true;
 }
 
 function aulasProntas() {
@@ -291,7 +320,8 @@ function extrairJSON(txt) {
 
 /* ---------------- sugestão de temas ---------------- */
 async function sugerirTemas() {
-  if (!aulasProntas().length) { toast('Adicione ao menos 1 aula com transcrição antes.', true); return; }
+  if (!(await garantirTranscricoes())) return;
+  if (!aulasProntas().length) { toast('Cole o link da aula (ou a transcrição) no passo 2 primeiro.', true); return; }
   if (config.modo === 'claude') { copiarPedido('temas'); return; }
   const btn = $('#btnTemas');
   btn.disabled = true; btn.textContent = 'Pensando nos temas…';
@@ -330,9 +360,9 @@ function desenharTemas() {
 
 /* ---------------- geração dos volumes ---------------- */
 async function gerarVolume(mode) {
+  if (!(await garantirTranscricoes())) return;
   const prontas = aulasProntas();
-  if (!projeto.nomeCurso.trim()) { toast('Preencha o nome do curso (passo 1).', true); return; }
-  if (!prontas.length) { toast('Adicione ao menos 1 aula com transcrição (passo 2).', true); return; }
+  if (!prontas.length) { toast('Cole o link da aula (ou a transcrição) no passo 2 primeiro.', true); return; }
   if (mode === 'vol2') {
     projeto.tema = $('#temaEscolhido').value.trim();
     if (!projeto.tema) { toast('Escolha ou digite o tema do Volume 2 (passo 3).', true); return; }
@@ -524,6 +554,13 @@ function boot() {
     atualizarModoUI();
   });
   $('#btnMontar').addEventListener('click', montarColado);
+  $('#btnCopiarTudo').addEventListener('click', async () => {
+    const t = $('#txtCopiar');
+    t.focus(); t.select();
+    try { await navigator.clipboard.writeText(t.value); }
+    catch { document.execCommand('copy'); }
+    toast('Pedido copiado! Agora cole numa conversa com o Claude e envie.');
+  });
 
   $('#nomeCurso').addEventListener('input', e => { projeto.nomeCurso = e.target.value; salvar(); });
   $('#temaEscolhido').addEventListener('input', e => { projeto.tema = e.target.value; desenharTemas(); salvar(); });
