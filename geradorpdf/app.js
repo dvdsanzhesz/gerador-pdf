@@ -146,7 +146,55 @@ function atualizarStatusAula(el, aula) {
   }
 }
 
+/* Espelhos que o próprio NAVEGADOR consulta (usa o IP da sua casa — plano C) */
+const ESPELHOS_NAVEGADOR = ['https://yewtu.be', 'https://id.420129.xyz', 'https://inv.nadeko.net'];
+
+function videoIdDe(url) {
+  const s = String(url || '').trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  const m = s.match(/[?&]v=([\w-]{11})/) || s.match(/youtu\.be\/([\w-]{11})/) || s.match(/\/(?:shorts|live|embed)\/([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+function sinal(ms) {
+  try { return AbortSignal.timeout(ms); } catch { return undefined; }
+}
+
+async function espelhoNavegador(videoId) {
+  for (const base of ESPELHOS_NAVEGADOR) {
+    try {
+      const res = await fetch(`${base}/api/v1/captions/${videoId}`, { signal: sinal(7000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const caps = data.captions || [];
+      if (!caps.length) continue;
+      const score = c => {
+        const lang = (c.language_code || c.languageCode || '').toLowerCase();
+        const auto = /auto/i.test(c.label || '');
+        if (lang.startsWith('pt') && !auto) return 0;
+        if (lang.startsWith('pt')) return 1;
+        if (!auto) return 2;
+        return 3;
+      };
+      const track = [...caps].sort((a, b) => score(a) - score(b))[0];
+      const cres = await fetch(base + track.url, { signal: sinal(7000) });
+      if (!cres.ok) continue;
+      const texto = limparLegenda(await cres.text(), 'legenda.vtt');
+      if (texto.length < 40) continue;
+      let titulo = '';
+      try {
+        const v = await fetch(`${base}/api/v1/videos/${videoId}?fields=title`, { signal: sinal(5000) });
+        if (v.ok) titulo = (await v.json()).title || '';
+      } catch { /* título é opcional */ }
+      return { texto, titulo, auto: /auto/i.test(track.label || '') };
+    } catch { /* tenta o próximo espelho */ }
+  }
+  return null;
+}
+
 async function puxarTranscricaoDados(aula) {
+  let erroBackend = '';
+  // Plano A e B: o backend tenta o YouTube direto e os espelhos pelo servidor
   try {
     const res = await fetch('api/transcript', {
       method: 'POST',
@@ -154,7 +202,7 @@ async function puxarTranscricaoDados(aula) {
       body: JSON.stringify({ url: aula.url })
     });
     const ct = res.headers.get('content-type') || '';
-    if (!ct.includes('json')) throw new Error('Backend indisponível — este site precisa estar publicado no Cloudflare (veja o README), ou cole a transcrição manualmente.');
+    if (!ct.includes('json')) throw new Error('Backend indisponível — este site precisa estar publicado no Cloudflare (veja o README).');
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     aula.texto = data.text;
@@ -164,10 +212,26 @@ async function puxarTranscricaoDados(aula) {
     aula.erro = '';
     return true;
   } catch (e) {
-    aula.status = 'erro';
-    aula.erro = e.message;
-    return false;
+    erroBackend = e.message;
   }
+
+  // Plano C: o próprio navegador consulta os espelhos (IP residencial, menos bloqueado)
+  const vid = videoIdDe(aula.url);
+  if (vid) {
+    const alt = await espelhoNavegador(vid);
+    if (alt) {
+      aula.texto = alt.texto;
+      aula.titulo = aula.titulo || alt.titulo || '';
+      aula.auto = alt.auto;
+      aula.status = 'ok';
+      aula.erro = '';
+      return true;
+    }
+  }
+
+  aula.status = 'erro';
+  aula.erro = erroBackend;
+  return false;
 }
 
 async function puxarTranscricao(aula, statusEl, rootEl) {
