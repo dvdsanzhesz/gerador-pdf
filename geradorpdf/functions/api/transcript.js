@@ -1,13 +1,28 @@
 /**
  * POST /api/transcript  { url: "https://www.youtube.com/watch?v=..." }
  * Extrai a transcrição (legendas) de um vídeo do YouTube.
- * Tenta o cliente ANDROID do InnerTube, depois o cliente WEB e, por fim,
- * a própria página do vídeo. Se nada funcionar, o front-end oferece
- * o modo manual (colar a transcrição).
+ *
+ * Ordem de tentativas:
+ *  1. YouTube direto (clientes ANDROID e WEB do InnerTube + página do vídeo)
+ *  2. Espelhos públicos do Invidious (contornam bloqueios 429 do YouTube)
+ *  3. Espelhos públicos do Piped
+ * Se nada funcionar, o front-end oferece o modo manual (colar a transcrição).
  */
 
 const UA_ANDROID = 'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
 const UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+const INVIDIOUS = [
+  'https://yewtu.be',
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.jing.rocks'
+];
+const PIPED = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.private.coffee'
+];
 
 function videoIdFrom(url) {
   const s = String(url || '').trim();
@@ -18,6 +33,12 @@ function videoIdFrom(url) {
     s.match(/\/(?:shorts|live|embed)\/([\w-]{11})/);
   return m ? m[1] : null;
 }
+
+function tmSignal(ms) {
+  try { return AbortSignal.timeout(ms); } catch { return undefined; }
+}
+
+/* ---------------- tentativa 1: YouTube direto ---------------- */
 
 async function playerResponse(videoId, clientName) {
   const clients = {
@@ -34,7 +55,8 @@ async function playerResponse(videoId, clientName) {
   const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'User-Agent': c.ua, 'Accept-Language': 'pt-BR,pt;q=0.9' },
-    body: JSON.stringify({ context: c.context, videoId })
+    body: JSON.stringify({ context: c.context, videoId }),
+    signal: tmSignal(8000)
   });
   if (!res.ok) throw new Error(`player ${clientName} HTTP ${res.status}`);
   return res.json();
@@ -46,7 +68,8 @@ async function watchPageResponse(videoId) {
       'User-Agent': UA_WEB,
       'Accept-Language': 'pt-BR,pt;q=0.9',
       'Cookie': 'CONSENT=YES+cb; SOCS=CAI'
-    }
+    },
+    signal: tmSignal(8000)
   });
   if (!res.ok) throw new Error(`watch HTTP ${res.status}`);
   const html = await res.text();
@@ -72,7 +95,7 @@ function pickTrack(pr) {
 async function fetchTrackText(track) {
   const sep = track.baseUrl.includes('?') ? '&' : '?';
   const url = `${track.baseUrl}${sep}fmt=json3`;
-  const res = await fetch(url, { headers: { 'User-Agent': UA_WEB } });
+  const res = await fetch(url, { headers: { 'User-Agent': UA_WEB }, signal: tmSignal(8000) });
   if (!res.ok) throw new Error(`timedtext HTTP ${res.status}`);
   const data = await res.json();
   const parts = [];
@@ -84,6 +107,112 @@ async function fetchTrackText(track) {
   return parts.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
 
+/* ---------------- limpeza de legendas (VTT / XML) ---------------- */
+
+function decodeEntities(s) {
+  return s
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&nbsp;/g, ' ');
+}
+
+function parseCaptionText(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return '';
+  let linhas;
+  if (t.startsWith('<')) {
+    const matches = [...t.matchAll(/<(?:text|p)\b[^>]*>([\s\S]*?)<\/(?:text|p)>/g)].map(m => m[1]);
+    linhas = matches.map(x => x.replace(/<[^>]+>/g, ' '));
+  } else {
+    linhas = t.split(/\r?\n/);
+  }
+  const uteis = [];
+  for (const l of linhas) {
+    const s = l.replace(/<[^>]+>/g, '').trim();
+    if (!s) continue;
+    if (/^WEBVTT/i.test(s) || /^(Kind|Language|NOTE|STYLE)[:\s]/i.test(s)) continue;
+    if (/^\d+$/.test(s)) continue;
+    if (/-->/.test(s)) continue;
+    const limpo = decodeEntities(s).trim();
+    if (limpo && limpo !== uteis[uteis.length - 1]) uteis.push(limpo);
+  }
+  return uteis.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+/* ---------------- tentativa 2: espelhos Invidious ---------------- */
+
+async function tryInvidious(videoId) {
+  for (const base of INVIDIOUS) {
+    try {
+      const res = await fetch(`${base}/api/v1/captions/${videoId}`, {
+        headers: { 'Accept': 'application/json' }, signal: tmSignal(6000)
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const caps = data.captions || [];
+      if (!caps.length) continue;
+      const score = c => {
+        const lang = (c.language_code || c.languageCode || '').toLowerCase();
+        const auto = /auto/i.test(c.label || '');
+        if (lang.startsWith('pt') && !auto) return 0;
+        if (lang.startsWith('pt')) return 1;
+        if (!auto) return 2;
+        return 3;
+      };
+      const track = [...caps].sort((a, b) => score(a) - score(b))[0];
+      const cres = await fetch(base + track.url, { signal: tmSignal(6000) });
+      if (!cres.ok) continue;
+      const text = parseCaptionText(await cres.text());
+      if (text.length < 40) continue;
+      let title = '', dur = 0;
+      try {
+        const vres = await fetch(`${base}/api/v1/videos/${videoId}?fields=title,lengthSeconds`, { signal: tmSignal(5000) });
+        if (vres.ok) { const v = await vres.json(); title = v.title || ''; dur = Number(v.lengthSeconds || 0); }
+      } catch { /* título é opcional */ }
+      return {
+        text, title, durationSeconds: dur,
+        language: track.language_code || track.languageCode || '',
+        auto: /auto/i.test(track.label || '')
+      };
+    } catch { /* tenta o próximo espelho */ }
+  }
+  return null;
+}
+
+/* ---------------- tentativa 3: espelhos Piped ---------------- */
+
+async function tryPiped(videoId) {
+  for (const base of PIPED) {
+    try {
+      const res = await fetch(`${base}/streams/${videoId}`, {
+        headers: { 'Accept': 'application/json' }, signal: tmSignal(6000)
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const subs = data.subtitles || [];
+      if (!subs.length) continue;
+      const score = s => {
+        const lang = (s.code || '').toLowerCase();
+        if (lang.startsWith('pt') && !s.autoGenerated) return 0;
+        if (lang.startsWith('pt')) return 1;
+        if (!s.autoGenerated) return 2;
+        return 3;
+      };
+      const track = [...subs].sort((a, b) => score(a) - score(b))[0];
+      const cres = await fetch(track.url, { signal: tmSignal(6000) });
+      if (!cres.ok) continue;
+      const text = parseCaptionText(await cres.text());
+      if (text.length < 40) continue;
+      return {
+        text, title: data.title || '', durationSeconds: Number(data.duration || 0),
+        language: track.code || '', auto: !!track.autoGenerated
+      };
+    } catch { /* tenta o próximo espelho */ }
+  }
+  return null;
+}
+
+/* ---------------- rota ---------------- */
+
 export async function onRequestPost(context) {
   const json = (obj, status = 200) =>
     new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
@@ -94,43 +223,45 @@ export async function onRequestPost(context) {
   const videoId = videoIdFrom(body.url);
   if (!videoId) return json({ ok: false, error: 'Não reconheci esse link do YouTube. Confira a URL.' });
 
+  const respostaOk = (r, fonte) => json({
+    ok: true, videoId, fonte,
+    title: r.title || '', durationSeconds: r.durationSeconds || 0,
+    language: r.language || '', auto: !!r.auto,
+    chars: r.text.length, text: r.text
+  });
+
+  // 1) YouTube direto
   const tentativas = [
     () => playerResponse(videoId, 'ANDROID'),
     () => playerResponse(videoId, 'WEB'),
     () => watchPageResponse(videoId)
   ];
-
   let ultimoErro = 'sem legendas';
   for (const tenta of tentativas) {
     try {
       const pr = await tenta();
       const status = pr?.playabilityStatus?.status;
-      if (status && status !== 'OK' && !pr?.captions) {
-        ultimoErro = `vídeo indisponível (${status})`;
-        continue;
-      }
+      if (status && status !== 'OK' && !pr?.captions) { ultimoErro = `vídeo indisponível (${status})`; continue; }
       const track = pickTrack(pr);
       if (!track) { ultimoErro = 'o vídeo não tem legendas/transcrição disponíveis'; continue; }
       const text = await fetchTrackText(track);
       if (!text || text.length < 40) { ultimoErro = 'transcrição vazia'; continue; }
       const vd = pr.videoDetails || {};
-      return json({
-        ok: true,
-        videoId,
-        title: vd.title || '',
-        durationSeconds: Number(vd.lengthSeconds || 0),
-        language: track.languageCode || '',
-        auto: track.kind === 'asr',
-        chars: text.length,
-        text
-      });
+      return respostaOk({
+        text, title: vd.title || '', durationSeconds: Number(vd.lengthSeconds || 0),
+        language: track.languageCode || '', auto: track.kind === 'asr'
+      }, 'youtube');
     } catch (e) {
       ultimoErro = e.message || String(e);
     }
   }
 
+  // 2) e 3) Espelhos públicos (contornam o bloqueio do YouTube a servidores de nuvem)
+  const alt = (await tryInvidious(videoId)) || (await tryPiped(videoId));
+  if (alt) return respostaOk(alt, 'espelho');
+
   return json({
     ok: false,
-    error: `Não consegui extrair a transcrição automaticamente (${ultimoErro}). Use a opção "colar transcrição manualmente".`
+    error: `O YouTube está bloqueando a extração automática neste momento (${ultimoErro}) e os espelhos alternativos também não responderam. Tente de novo em 1–2 minutos, ou use "colar transcrição manualmente" — funciona sempre.`
   });
 }
