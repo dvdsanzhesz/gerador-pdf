@@ -32,7 +32,7 @@
     <section class="cartao">
       <h2><span class="passo">1</span> Curso</h2>
       <label class="campo">
-        <span>Nome do curso</span>
+        <span>Nome do curso <em>(opcional — sem ele, o Claude deduz pelo conteúdo)</em></span>
         <input type="text" id="nomeCurso" placeholder="Ex.: Análise do Comportamento Aplicada (ABA) ao TEA">
       </label>
       <label class="campo">
@@ -44,7 +44,7 @@
 
     <section class="cartao">
       <h2><span class="passo">2</span> Aulas do YouTube</h2>
-      <p class="dica">Cole o link de cada aula e clique em <strong>Puxar transcrição</strong>. Se o vídeo não tiver legenda ou a extração falhar, abra “colar manualmente”.</p>
+      <p class="dica">Cole o link de cada aula — <strong>só isso já basta</strong>: ao gerar, o site puxa as transcrições sozinho. O botão “Puxar transcrição” é opcional (serve pra conferir antes). Se o vídeo não tiver legenda, abra “colar manualmente”.</p>
       <div id="listaAulas"></div>
       <button class="btn btn-suave" id="btnAddAula">+ Adicionar aula</button>
     </section>
@@ -172,10 +172,13 @@
 
 <dialog id="modalCopiar">
   <form method="dialog" class="config">
-    <h2>Copie o pedido abaixo</h2>
-    <p class="dica">Seu navegador bloqueou a cópia automática. Clique no quadro, selecione tudo (Ctrl+A) e copie (Ctrl+C). Depois cole numa conversa com o Claude.</p>
-    <textarea id="txtCopiar" rows="10"></textarea>
-    <div class="config-acoes"><button class="btn btn-primario" value="ok">Fechar</button></div>
+    <h2>Pedido pronto!</h2>
+    <p class="dica">Clique em <strong>Copiar tudo</strong> e cole numa conversa com o Claude (app ou claude.ai). Quando ele responder, traga a resposta para o quadro "Modo grátis" do site.</p>
+    <textarea id="txtCopiar" rows="9"></textarea>
+    <div class="config-acoes">
+      <button class="btn btn-primario" type="button" id="btnCopiarTudo">📋 Copiar tudo</button>
+      <button class="btn btn-fantasma" value="ok">Fechar</button>
+    </div>
   </form>
 </dialog>
 
