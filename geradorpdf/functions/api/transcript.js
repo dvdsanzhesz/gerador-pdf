@@ -248,6 +248,28 @@ export async function onRequestPost(context) {
     chars: r.text.length, text: r.text
   });
 
+  // 0) Extrator próprio no Google (Apps Script) — o caminho mais confiável, se configurado
+  const gas = String(body.gas || context.env.GAS_URL || '').trim();
+  if (gas && /^https:\/\/script\.google(?:usercontent)?\.com\//.test(gas)) {
+    try {
+      const sep = gas.includes('?') ? '&' : '?';
+      const res = await fetch(`${gas}${sep}video=${videoId}`, {
+        redirect: 'follow',
+        signal: tmSignal(25000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.ok && data.text && data.text.length > 40) {
+          return respostaOk({
+            text: data.text, title: data.title || '',
+            durationSeconds: Number(data.durationSeconds || 0),
+            language: data.language || '', auto: !!data.auto
+          }, 'google');
+        }
+      }
+    } catch { /* segue para os outros planos */ }
+  }
+
   // 1) YouTube direto (com uma re-tentativa após pausa — o bloqueio 429 às vezes é passageiro)
   const espera = ms => new Promise(r => setTimeout(r, ms));
   const tentativas = [
