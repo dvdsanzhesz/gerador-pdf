@@ -21,7 +21,7 @@ let projeto = {
   tema: '',
   apostilas: {}         // {vol1: dados, vol2: dados, vol3: dados}
 };
-let config = { modelo: MODELO_PADRAO, rodape: RODAPE_PADRAO, chave: '', modo: 'claude', gas: '' };
+let config = { modelo: MODELO_PADRAO, rodape: RODAPE_PADRAO, chave: '', modo: 'claude', gas: '', gemini: '' };
 let volumeAtual = null;
 let abortCtl = null;
 let ultimoPedido = null; // último volume copiado no modo grátis
@@ -199,7 +199,7 @@ async function puxarTranscricaoDados(aula) {
     const res = await fetch('api/transcript', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: aula.url, gas: config.gas || '' })
+      body: JSON.stringify({ url: aula.url, gas: config.gas || '', gemini: config.gemini || '' })
     });
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('json')) throw new Error('Backend indisponível — este site precisa estar publicado no Cloudflare (veja o README).');
@@ -622,6 +622,7 @@ function abrirConfig() {
   $('#cfgRodape').value = config.rodape;
   $('#cfgChave').value = config.chave;
   $('#cfgGas').value = config.gas || '';
+  $('#cfgGemini').value = config.gemini || '';
   $('#modalConfig').showModal();
 }
 
@@ -685,6 +686,7 @@ function boot() {
     config.rodape = $('#cfgRodape').value.trim() || RODAPE_PADRAO;
     config.chave = $('#cfgChave').value.trim();
     config.gas = $('#cfgGas').value.trim();
+    config.gemini = $('#cfgGemini').value.trim();
     salvarConfig();
     toast('Configurações salvas.');
   });
