@@ -14,15 +14,32 @@ const UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KH
 
 const INVIDIOUS = [
   'https://yewtu.be',
-  'https://inv.nadeko.net',
-  'https://invidious.nerdvpn.de',
-  'https://invidious.jing.rocks'
+  'https://id.420129.xyz',
+  'https://inv.nadeko.net'
 ];
 const PIPED = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.adminforge.de',
   'https://api.piped.private.coffee'
 ];
+
+/* Busca a lista atual de espelhos no registro oficial (se falhar, usa a lista fixa) */
+async function listaInvidious() {
+  try {
+    const res = await fetch('https://api.invidious.io/instances.json?sort_by=health', {
+      headers: { 'Accept': 'application/json' }, signal: tmSignal(5000)
+    });
+    if (!res.ok) throw new Error('registro indisponível');
+    const data = await res.json();
+    const urls = data
+      .filter(e => e[1] && e[1].type === 'https' && e[1].api !== false)
+      .map(e => String(e[1].uri || '').replace(/\/+$/, ''))
+      .filter(Boolean)
+      .slice(0, 8);
+    const todas = [...new Set([...urls, ...INVIDIOUS])];
+    return todas.length ? todas : INVIDIOUS;
+  } catch {
+    return INVIDIOUS;
+  }
+}
 
 function videoIdFrom(url) {
   const s = String(url || '').trim();
@@ -141,7 +158,8 @@ function parseCaptionText(raw) {
 /* ---------------- tentativa 2: espelhos Invidious ---------------- */
 
 async function tryInvidious(videoId) {
-  for (const base of INVIDIOUS) {
+  const bases = await listaInvidious();
+  for (const base of bases) {
     try {
       const res = await fetch(`${base}/api/v1/captions/${videoId}`, {
         headers: { 'Accept': 'application/json' }, signal: tmSignal(6000)
@@ -230,11 +248,13 @@ export async function onRequestPost(context) {
     chars: r.text.length, text: r.text
   });
 
-  // 1) YouTube direto
+  // 1) YouTube direto (com uma re-tentativa após pausa — o bloqueio 429 às vezes é passageiro)
+  const espera = ms => new Promise(r => setTimeout(r, ms));
   const tentativas = [
     () => playerResponse(videoId, 'ANDROID'),
     () => playerResponse(videoId, 'WEB'),
-    () => watchPageResponse(videoId)
+    () => watchPageResponse(videoId),
+    async () => { await espera(1500); return playerResponse(videoId, 'ANDROID'); }
   ];
   let ultimoErro = 'sem legendas';
   for (const tenta of tentativas) {
