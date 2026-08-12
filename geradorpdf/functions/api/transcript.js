@@ -229,6 +229,47 @@ async function tryPiped(videoId) {
   return null;
 }
 
+/* ---------------- tentativa final: Gemini transcreve o áudio (vídeo SEM legenda) ---------------- */
+
+async function tryGemini(videoId, key) {
+  const modelos = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  let erro = 'nenhum modelo Gemini disponível';
+  for (const modelo of modelos) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { fileData: { fileUri: `https://www.youtube.com/watch?v=${videoId}` } },
+              { text: 'Transcreva integralmente a fala deste vídeo, em português, como texto corrido. Sem timestamps, sem títulos, sem comentários seus — apenas a transcrição completa.' }
+            ]
+          }],
+          generationConfig: { temperature: 0 }
+        }),
+        signal: tmSignal(240000)
+      });
+      if (res.status === 404) { erro = `modelo ${modelo} indisponível`; continue; }
+      if (!res.ok) {
+        let msg = '';
+        try { msg = (await res.json())?.error?.message || ''; } catch { /* sem detalhe */ }
+        throw new Error(`Gemini HTTP ${res.status}${msg ? ' — ' + msg.slice(0, 160) : ''}`);
+      }
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts || [])
+        .map(p => p.text || '').join(' ').replace(/\s{2,}/g, ' ').trim();
+      if (text.length < 40) throw new Error('a transcrição do Gemini veio vazia');
+      return { text, title: '', durationSeconds: 0, language: 'pt', auto: true };
+    } catch (e) {
+      erro = e.message || String(e);
+      if (/HTTP 404/.test(erro)) continue;
+      throw new Error(erro);
+    }
+  }
+  throw new Error(erro);
+}
+
 /* ---------------- rota ---------------- */
 
 export async function onRequestPost(context) {
@@ -302,8 +343,22 @@ export async function onRequestPost(context) {
   const alt = (await tryInvidious(videoId)) || (await tryPiped(videoId));
   if (alt) return respostaOk(alt, 'espelho');
 
+  // 4) Gemini transcreve o áudio (funciona até para vídeo SEM legenda — igual ao NotebookLM)
+  const geminiKey = String(body.gemini || context.env.GEMINI_API_KEY || '').trim();
+  if (geminiKey) {
+    try {
+      const g = await tryGemini(videoId, geminiKey);
+      return respostaOk(g, 'gemini');
+    } catch (e) {
+      ultimoErro = `Gemini: ${e.message || e}`;
+    }
+  }
+
+  const dicaGemini = geminiKey
+    ? ''
+    : ' Dica: configure a chave gratuita do Gemini em ⚙ Configurações — aí a transcrição sai até de vídeo sem legenda, igual ao NotebookLM.';
   return json({
     ok: false,
-    error: `O YouTube está bloqueando a extração automática neste momento (${ultimoErro}) e os espelhos alternativos também não responderam. Tente de novo em 1–2 minutos, ou use "colar transcrição manualmente" — funciona sempre.`
+    error: `Não consegui extrair a transcrição (${ultimoErro}).${dicaGemini} Alternativa que sempre funciona: "colar transcrição manualmente".`
   });
 }
