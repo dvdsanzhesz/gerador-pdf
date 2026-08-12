@@ -1,0 +1,12 @@
+// Configuração para deploy como Cloudflare WORKER (Import a repository / npx wrangler deploy).
+// O mesmo repositório também funciona como projeto Cloudflare PAGES — os dois formatos são suportados.
+// ATENÇÃO: o "name" abaixo precisa ser IGUAL ao nome do seu Worker no painel do Cloudflare.
+{
+  "name": "gerador-pdf",
+  "compatibility_date": "2026-08-01",
+  "main": "worker.js",
+  "assets": {
+    "directory": "./",
+    "binding": "ASSETS"
+  }
+}
