@@ -163,6 +163,11 @@
       <input type="text" id="cfgGas" placeholder="https://script.google.com/macros/s/…/exec">
     </label>
 
+    <label class="campo">
+      <span>Transcrição por IA — chave do Gemini <em>(grátis, sem cartão: aistudio.google.com/apikey → "Criar chave de API" → cole aqui. Transcreve até vídeo SEM legenda, igual ao NotebookLM.)</em></span>
+      <input type="password" id="cfgGemini" placeholder="AIza…">
+    </label>
+
     <details class="cfg-avancado">
       <summary>Avançado — usar sem backend</summary>
       <p class="dica">O normal é publicar este site no Cloudflare Pages com a variável <code>ANTHROPIC_API_KEY</code> (veja o README). Se você estiver rodando o site sem backend (ex.: GitHub Pages), pode colar sua chave aqui — ela fica salva <strong>somente neste navegador</strong>.</p>
