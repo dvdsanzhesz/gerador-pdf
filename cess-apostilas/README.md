@@ -30,7 +30,12 @@ Tudo acontece com um clique só, sem copiar e colar — ideal para equipe ou uso
 
 ## Como publicar (uma vez só)
 
-O site foi feito para o **Cloudflare Pages** (grátis), conectado ao GitHub — igual aos seus outros projetos.
+O repositório funciona nos **dois formatos** do Cloudflare, conectado ao GitHub:
+
+- **Worker** (fluxo novo: *Import a repository* — o painel usa `npx wrangler deploy`): funciona direto, sem configurar nada — o arquivo `wrangler.jsonc` já cuida de tudo.
+- **Pages** (fluxo clássico, abaixo): também funciona.
+
+Nos dois casos, o site sobe grátis e a extração de transcrição já funciona. A chave da API (passo 3) só é necessária para o **modo automático**.
 
 ### 1. Suba os arquivos no GitHub
 
@@ -62,8 +67,8 @@ Pronto — o site fica no endereço `https://cess-apostilas.pages.dev` (ou o dom
 
 ## Como usar no dia a dia
 
-1. **Curso** — digite o nome do curso e, se quiser, envie uma foto para a capa (sem foto, sai um fundo elegante do CESS).
-2. **Aulas** — cole o link de cada aula e clique em **Puxar transcrição**. Adicione quantas aulas o curso tiver.
+1. **Curso** — nome do curso e foto de capa são opcionais (sem foto, sai um fundo elegante do CESS; sem nome, o Claude deduz pelo conteúdo).
+2. **Aulas** — cole o link de cada aula e pronto: ao clicar no volume, o site puxa as transcrições sozinho. (O botão **Puxar transcrição** é opcional, só para conferir antes.)
 3. **Tema do Volume 2** — clique em **Sugerir temas com IA** e escolha um (ou digite o seu).
 4. **Gerar** — clique no volume desejado. No modo grátis, siga o copiar/colar descrito acima; no automático, a apostila aparece sozinha em ~1 a 4 minutos.
 5. **Salvar PDF** — na janela de impressão escolha:
@@ -89,6 +94,9 @@ No **modo grátis**: nada além da assinatura do Claude que você já tem (vale 
 
 **Uma página ficou com conteúdo “vazando”?**
 O preview marca a página com um aviso vermelho. Use **✎ Editar texto** para encurtar, ou gere o volume de novo.
+
+**O deploy falhou com "Could not detect a directory containing static files"?**
+Esse erro acontecia quando o projeto era criado como **Worker** sem o arquivo `wrangler.jsonc`. As versões atuais do repositório já incluem esse arquivo (e o `worker.js`) — suba todos os arquivos de novo no GitHub e o deploy roda sozinho. Se estiver usando Worker, a variável `ANTHROPIC_API_KEY` (modo automático) vai em: **seu Worker → Settings → Variables and Secrets**.
 
 **Dá para usar sem o Cloudflare (ex.: GitHub Pages)?**
 Dá, mas aí não existe backend: a extração automática de transcrição não funciona (use o modo manual) e você precisa colar sua chave da API em **⚙ Configurações → Avançado** (a chave fica salva só no seu navegador).
