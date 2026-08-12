@@ -50,7 +50,7 @@ function xmlAulas(aulas) {
 }
 
 export function buildPrompt({ mode, courseName, tema, aulas }) {
-  const curso = courseName || 'Curso CESS';
+  const curso = (courseName || '').trim() || '(não informado — deduza o nome do curso a partir do conteúdo das aulas)';
 
   if (mode === 'temas') {
     return {
