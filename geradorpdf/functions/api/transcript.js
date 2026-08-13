@@ -255,13 +255,15 @@ async function tryGemini(videoId, key) {
   if (!modelos.length) modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash'];
   const espera = ms => new Promise(r => setTimeout(r, ms));
   let erro = 'nenhum modelo Gemini disponível';
+  let esperou429 = false; // cota por minuto: espera 35s UMA vez e re-tenta
 
   for (const modelo of modelos) {
     // até 2 tentativas por modelo (com pausa quando estiver sobrecarregado)
     for (let vez = 0; vez < 2; vez++) {
       let res;
       try {
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(key)}`, {
+        // STREAMING: a conexão recebe dados continuamente — evita o timeout 524 em vídeos longos
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -273,7 +275,7 @@ async function tryGemini(videoId, key) {
             }],
             generationConfig: { temperature: 0 }
           }),
-          signal: tmSignal(240000)
+          signal: tmSignal(480000)
         });
       } catch (e) {
         erro = `falha de rede no Gemini (${e.message || e})`;
@@ -281,8 +283,13 @@ async function tryGemini(videoId, key) {
       }
 
       if (res.status === 404) { erro = `modelo ${modelo} indisponível`; break; } // próximo modelo
-      if (res.status === 503 || res.status === 429) {
-        erro = `Gemini lotado no momento (HTTP ${res.status}) — tente de novo em alguns minutos`;
+      if (res.status === 429) {
+        erro = 'cota gratuita do Gemini atingida (HTTP 429)';
+        if (!esperou429) { esperou429 = true; await espera(35000); continue; } // cota por MINUTO: espera e re-tenta
+        break; // persistiu: tenta o próximo modelo (cotas são separadas por modelo)
+      }
+      if (res.status === 503 || res.status === 524) {
+        erro = `Gemini lotado/demorado no momento (HTTP ${res.status}) — tente de novo em alguns minutos`;
         await espera(3000);
         continue; // re-tenta o mesmo modelo; se persistir, cai para o próximo
       }
@@ -292,9 +299,34 @@ async function tryGemini(videoId, key) {
         throw new Error(`Gemini HTTP ${res.status}${msg ? ' — ' + msg.slice(0, 160) : ''}`);
       }
 
-      const data = await res.json();
-      const text = (data?.candidates?.[0]?.content?.parts || [])
-        .map(p => p.text || '').join(' ').replace(/\s{2,}/g, ' ').trim();
+      // lê o SSE acumulando o texto
+      let text = '';
+      try {
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const linhas = buf.split('\n');
+          buf = linhas.pop();
+          for (const l of linhas) {
+            if (!l.startsWith('data:')) continue;
+            const raw = l.slice(5).trim();
+            if (!raw) continue;
+            try {
+              const ev = JSON.parse(raw);
+              const t = (ev.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
+              if (t) text += t;
+            } catch { /* pedaço incompleto — ignora */ }
+          }
+        }
+      } catch (e) {
+        erro = `stream interrompido (${e.message || e})`;
+        continue; // re-tenta
+      }
+      text = text.replace(/\s{2,}/g, ' ').trim();
       if (text.length < 40) { erro = `a transcrição do ${modelo} veio vazia`; break; }
       return { text, title: '', durationSeconds: 0, language: 'pt', auto: true };
     }
@@ -376,21 +408,48 @@ export async function onRequestPost(context) {
   if (alt) return respostaOk(alt, 'espelho');
 
   // 4) Gemini transcreve o áudio (funciona até para vídeo SEM legenda — igual ao NotebookLM)
+  //    A resposta sai em "gotejamento" (espaços a cada 8s + JSON no final): a conexão com o
+  //    navegador nunca fica parada, então o vídeo pode demorar quanto precisar sem dar 524.
   const geminiKey = String(body.gemini || context.env.GEMINI_API_KEY || '').trim();
   if (geminiKey) {
-    try {
-      const g = await tryGemini(videoId, geminiKey);
-      return respostaOk(g, 'gemini');
-    } catch (e) {
-      ultimoErro = `Gemini: ${e.message || e}`;
-    }
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        const batimento = setInterval(() => {
+          try { controller.enqueue(enc.encode(' ')); } catch { /* stream já fechado */ }
+        }, 8000);
+        (async () => {
+          try {
+            const g = await tryGemini(videoId, geminiKey);
+            controller.enqueue(enc.encode(JSON.stringify({
+              ok: true, videoId, fonte: 'gemini',
+              title: g.title || '', durationSeconds: g.durationSeconds || 0,
+              language: g.language || 'pt', auto: true,
+              chars: g.text.length, text: g.text
+            })));
+          } catch (e) {
+            const msg = String(e.message || e);
+            const explicacao = /429|cota/i.test(msg)
+              ? 'A cota GRATUITA do Gemini foi atingida. Se for a do minuto, espere 2 minutos e tente de novo; se persistir, a do DIA esgotou (renova de madrugada). Dica: vídeo que JÁ tem legenda no YouTube não gasta cota nenhuma — confira no YouTube Studio → Legendas se a automática já nasceu.'
+              : 'Tente de novo em alguns minutos.';
+            controller.enqueue(enc.encode(JSON.stringify({
+              ok: false,
+              error: `Não consegui extrair a transcrição (Gemini: ${msg}). ${explicacao} Alternativa que sempre funciona: "colar transcrição manualmente".`
+            })));
+          } finally {
+            clearInterval(batimento);
+            try { controller.close(); } catch { /* já fechado */ }
+          }
+        })();
+      }
+    });
+    return new Response(stream, {
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' }
+    });
   }
 
-  const dicaGemini = geminiKey
-    ? ''
-    : ' Dica: configure a chave gratuita do Gemini em ⚙ Configurações — aí a transcrição sai até de vídeo sem legenda, igual ao NotebookLM.';
   return json({
     ok: false,
-    error: `Não consegui extrair a transcrição (${ultimoErro}).${dicaGemini} Alternativa que sempre funciona: "colar transcrição manualmente".`
+    error: `Não consegui extrair a transcrição (${ultimoErro}). Dica: configure a chave gratuita do Gemini em ⚙ Configurações — aí a transcrição sai até de vídeo sem legenda, igual ao NotebookLM. Alternativa que sempre funciona: "colar transcrição manualmente".`
   });
 }
