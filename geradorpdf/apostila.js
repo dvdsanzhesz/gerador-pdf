@@ -275,11 +275,11 @@ function pesoBloco(b) {
     case 'texto': return palavras(b.texto);
     case 'subtitulo': return 12;
     case 'lista': return itens.reduce((s, i) => s + palavras(typeof i === 'string' ? i : i.texto), 0) + itens.length * 6;
-    case 'cards': return itens.reduce((s, i) => s + palavras(i.titulo) * 2 + palavras(i.texto), 0) + itens.length * 25;
+    case 'cards': return itens.reduce((s, i) => s + palavras(i.titulo) * 2 + palavras(i.texto), 0) + itens.length * 34;
     case 'stats':
     case 'estatisticas': return itens.length * 35 + itens.reduce((s, i) => s + palavras(i.descricao), 0);
     case 'timeline': return itens.reduce((s, i) => s + palavras(i.texto), 0) + itens.length * 20;
-    case 'tabela': return (b.linhas || []).flat().reduce((s, c) => s + palavras(c), 0) + (b.linhas || []).length * 18 + 20;
+    case 'tabela': return (b.linhas || []).flat().reduce((s, c) => s + palavras(c), 0) + (b.linhas || []).length * 24 + 20;
     case 'destaque': return palavras(b.texto) + 18;
     case 'ponto_chave': return palavras(b.texto) + 12;
     case 'fluxo': return itens.reduce((s, i) => s + palavras(i.titulo) + palavras(i.texto), 0) + itens.length * 28;
@@ -300,7 +300,7 @@ function pesoPagina(pg) {
 
 function equilibrarPaginas(paginas) {
   const LEVE = 230;   // abaixo disso a página fica com buracos
-  const TETO = 430;   // acima disso corre risco de estourar a folha
+  const TETO = 390;   // acima disso corre risco de estourar a folha
   const arr = paginas.map(p => Object.assign({}, p, { blocos: [...(p.blocos || [])] }));
   const out = [];
   let i = 0;
@@ -336,8 +336,31 @@ function equilibrarPaginas(paginas) {
   return out;
 }
 
+/* Se a IA não incluiu nenhuma foto interna, injeta 1-2 nas páginas mais leves */
+function garantirImagens(paginas, tituloApostila) {
+  const jaTem = paginas.some(p => (p.blocos || []).some(b => b && b.tipo === 'imagem'));
+  if (jaTem || paginas.length < 2) return paginas;
+  const candidatas = paginas
+    .map((p, i) => ({ i, peso: pesoPagina(p) }))
+    .filter(x => x.peso + 170 <= 420)
+    .sort((a, b) => a.peso - b.peso)
+    .slice(0, 2);
+  for (const { i } of candidatas) {
+    const pg = paginas[i];
+    const prompt = `${pg.titulo || tituloApostila || 'education'}, ${tituloApostila || ''}, realistic documentary photograph, warm natural light, no text`;
+    const blocos = pg.blocos || [];
+    pg.blocos = blocos.length
+      ? [blocos[0], { tipo: 'imagem', prompt }, ...blocos.slice(1)]
+      : [{ tipo: 'imagem', prompt }];
+  }
+  return paginas;
+}
+
 export function renderSheets(data, cfg) {
-  const paginas = equilibrarPaginas((data && data.paginas) || []);
+  const paginas = garantirImagens(
+    equilibrarPaginas((data && data.paginas) || []),
+    (data && data.titulo) || ''
+  );
   return renderCapa(data || {}, cfg) + paginas.map((p, i) => renderPagina(p, i, cfg)).join('');
 }
 
