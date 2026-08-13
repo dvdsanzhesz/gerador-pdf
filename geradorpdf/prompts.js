@@ -30,7 +30,7 @@ TIPOS DE BLOCO DISPONÍVEIS (use exatamente estes formatos):
 10. Fluxo com setas: {"tipo":"fluxo","itens":[{"titulo":"Antecedente (A)","texto":"O que acontece antes."}]} (2 a 4 etapas encadeadas)
 11. Lista com ícones: {"tipo":"lista_icones","itens":[{"texto":"Mensagem final importante."}]} (4 a 6 itens, para conclusões)
 12. Duas colunas: {"tipo":"colunas","proporcao":"1-1","esquerda":[...blocos...],"direita":[...blocos...]} (ex.: texto à esquerda e stats à direita)
-13. Imagem ilustrativa: {"tipo":"imagem","prompt":"photo description IN ENGLISH, realistic, no text","legenda":"legenda curta opcional em português"} — inclua 2 a 4 por apostila, em páginas de abertura de módulo, contexto histórico ou cena prática. Nunca em páginas já cheias.
+13. Imagem ilustrativa: {"tipo":"imagem","prompt":"photo description IN ENGLISH, realistic, no text","legenda":"legenda curta opcional em português"} — OBRIGATÓRIO incluir 2 ou 3 por apostila (nunca zero), em páginas de abertura de módulo, contexto histórico ou cena prática. Nunca em páginas já cheias (com tabela grande ou 5+ cards).
 `;
 
 const ESTILO_DOC = `
