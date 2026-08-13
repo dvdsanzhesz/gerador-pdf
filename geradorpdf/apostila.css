@@ -47,8 +47,10 @@ body.apostila { background: #4b4e55; }
 .sheet-header img { height: 9.2mm; width: auto; }
 
 .sheet-body { flex: 1 1 auto; padding: 1.5mm 13.5mm 5mm; display: flex; flex-direction: column; }
-/* centraliza o conteúdo no espaço restante — mata as lacunas brancas de cima/baixo em páginas mais leves */
+/* mata as lacunas brancas: página com 1 bloco centraliza; com 2+ blocos, o conteúdo
+   se distribui do topo ao pé da página (o respiro fica NO MEIO, entre os blocos) */
 .pg-corpo { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+.pg-corpo--esp { justify-content: space-between; padding-bottom: 6mm; }
 .pg-corpo > .bloco:last-child { margin-bottom: 0; }
 
 .sheet-footer {
