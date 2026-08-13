@@ -43,8 +43,24 @@ export async function onRequestPost(context) {
     });
 
     const espera = ms => new Promise(r => setTimeout(r, ms));
-    // "latest" aponta sempre pro modelo vigente — os demais são reservas; 404 = pula pro próximo
-    const modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash', 'gemini-flash-lite-latest'];
+
+    // Pergunta ao Google quais modelos a chave pode usar e prioriza os "flash"
+    let modelos = [];
+    try {
+      const lst = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(gKey)}&pageSize=100`);
+      if (lst.ok) {
+        const data = await lst.json();
+        const nomes = (data.models || [])
+          .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+          .map(m => String(m.name || '').replace(/^models\//, ''))
+          .filter(n => !/embedding|imagen|veo|tts|audio|image|live|robotics|gemma|nano|exp\b/i.test(n));
+        const score = n =>
+          (/flash/i.test(n) && !/lite/i.test(n) ? 0 : /flash/i.test(n) ? 10 : 20)
+          - (/latest/i.test(n) ? 2 : 0);
+        modelos = [...new Set(nomes)].sort((a, b) => score(a) - score(b)).slice(0, 5);
+      }
+    } catch { /* usa a lista fixa abaixo */ }
+    if (!modelos.length) modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash'];
 
     let ultimo = '';
     for (const modelo of modelos) {
@@ -73,7 +89,7 @@ export async function onRequestPost(context) {
         });
       }
     }
-    return erro(`${ultimo || 'Gemini indisponível'} — tente de novo em alguns minutos.`, 503);
+    return erro(`${ultimo || 'Gemini indisponível'} — tente de novo em alguns minutos. [modelos testados: ${modelos.join(', ')}]`, 503);
   }
 
   /* ============ Motor CLAUDE (API da Anthropic) ============ */
