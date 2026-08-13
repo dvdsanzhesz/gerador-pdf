@@ -54,12 +54,12 @@ function pars(texto, cls = 'par') {
 function cor(i) { return `c${i % 5}`; }
 function icone(nome) { return ICONS[nome] || ICONS.alvo; }
 
-/* Gera URL de foto por IA (Pollinations — grátis, sem chave). Seed estável por prompt. */
+/* Gera URL de foto por IA (Pollinations/Flux — grátis, sem chave). Seed estável por prompt. */
 function fotoURL(prompt, w, h) {
-  const p = `${String(prompt || '').slice(0, 400)}, professional photography, realistic, no text, no watermark`;
+  const p = `${String(prompt || '').slice(0, 380)}, professional editorial photography, photorealistic, cinematic soft natural light, shallow depth of field, high detail, elegant composition, no text, no watermark, no logo`;
   let seed = 0;
   for (let i = 0; i < p.length; i++) seed = (seed * 31 + p.charCodeAt(i)) % 999983;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${w}&height=${h}&model=flux&enhance=true&nologo=true&seed=${seed}`;
 }
 
 /* ---------------- blocos ---------------- */
