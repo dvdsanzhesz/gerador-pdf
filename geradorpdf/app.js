@@ -95,7 +95,15 @@ function desenharAulas() {
     });
     atualizarStatusAula(status, aula);
 
-    inpUrl.addEventListener('input', () => { aula.url = inpUrl.value.trim(); salvar(); });
+    inpUrl.addEventListener('input', () => {
+      aula.url = inpUrl.value.trim();
+      salvar();
+      // colou o link? a transcrição entra sozinha na fila
+      clearTimeout(aula._timerAuto);
+      aula._timerAuto = setTimeout(() => {
+        if (!aula.texto || aula.texto.trim().length <= 50) enfileirar(aula);
+      }, 900);
+    });
     inpTitulo.addEventListener('input', () => { aula.titulo = inpTitulo.value; salvar(); });
     inpTexto.addEventListener('input', () => {
       aula.texto = inpTexto.value;
@@ -118,13 +126,6 @@ function desenharAulas() {
       };
       rd.readAsText(file);
     });
-    node.querySelector('.aula-puxar').addEventListener('click', async ev => {
-      const btn = ev.currentTarget;
-      btn.disabled = true; btn.textContent = 'Extraindo…';
-      await puxarTranscricao(aula, status, root);
-      btn.disabled = false; btn.textContent = 'Puxar transcrição';
-      salvar();
-    });
     node.querySelector('.aula-remover').addEventListener('click', () => {
       projeto.aulas.splice(i, 1);
       if (!projeto.aulas.length) novaAula();
@@ -138,7 +139,11 @@ function desenharAulas() {
 
 function atualizarStatusAula(el, aula) {
   el.className = 'aula-status';
-  if (aula.status === 'ok') {
+  if (aula.status === 'fila') {
+    el.textContent = '⏳ Na fila de transcrição…';
+  } else if (aula.status === 'extraindo') {
+    el.textContent = '⏳ Extraindo transcrição… (vídeo sem legenda pode levar minutos)';
+  } else if (aula.status === 'ok') {
     el.classList.add('ok');
     el.textContent = `✔ Transcrição extraída${aula.titulo ? ` — “${aula.titulo}”` : ''} (${milhar(aula.texto.length)} caracteres${aula.auto ? ', legenda automática' : ''})`;
   } else if (aula.status === 'manual') {
@@ -238,34 +243,72 @@ async function puxarTranscricaoDados(aula) {
   return false;
 }
 
-async function puxarTranscricao(aula, statusEl, rootEl) {
-  if (!aula.url) { toast('Cole o link do YouTube primeiro.', true); return; }
-  await puxarTranscricaoDados(aula);
-  atualizarStatusAula(statusEl, aula);
-  rootEl.querySelector('.aula-texto').value = aula.texto || '';
-  rootEl.querySelector('.aula-titulo').value = aula.titulo || '';
-  if (aula.status === 'erro') rootEl.querySelector('.aula-manual').open = true;
+/* ---------------- fila de transcrição (uma por vez) ---------------- */
+const filaTranscricao = [];
+let rodandoFila = false;
+
+function atualizarLinhaAula(aula) {
+  const idx = projeto.aulas.indexOf(aula);
+  const row = $('#listaAulas') && $('#listaAulas').children[idx];
+  if (!row) return;
+  atualizarStatusAula(row.querySelector('.aula-status'), aula);
+  const t = row.querySelector('.aula-texto');
+  if (t && !t.matches(':focus') && t.value !== (aula.texto || '')) t.value = aula.texto || '';
+  const ti = row.querySelector('.aula-titulo');
+  if (ti && !ti.matches(':focus') && ti.value !== (aula.titulo || '')) ti.value = aula.titulo || '';
+  if (aula.status === 'erro') row.querySelector('.aula-manual').open = true;
 }
 
-async function extrairPendentes(pendentes) {
-  if (!pendentes.length) return [];
-  $('#statusGeracao').classList.remove('oculto');
-  $('#statusTitulo').textContent = 'Extraindo transcrições do YouTube…';
-  $('#statusDetalhe').textContent = `${pendentes.length} aula(s) — vídeo sem legenda pode levar 1 a 3 min (IA transcrevendo)`;
+function enfileirar(aula) {
+  if (!aula || aula._naFila) return;
+  if (aula.texto && aula.texto.trim().length > 50) return;
+  if (!videoIdDe(aula.url)) return;
+  aula._naFila = true;
+  aula.status = 'fila';
+  aula.erro = '';
+  atualizarLinhaAula(aula);
+  filaTranscricao.push(aula);
+  rodarFila();
+}
+
+async function rodarFila() {
+  if (rodandoFila) return;
+  rodandoFila = true;
   try {
-    await Promise.all(pendentes.map(a => puxarTranscricaoDados(a)));
+    while (filaTranscricao.length) {
+      const aula = filaTranscricao.shift();
+      if (!projeto.aulas.includes(aula)) { aula._naFila = false; continue; }
+      if (aula.texto && aula.texto.trim().length > 50) { aula._naFila = false; aula.status = 'manual'; atualizarLinhaAula(aula); continue; }
+      aula.status = 'extraindo';
+      atualizarLinhaAula(aula);
+      await puxarTranscricaoDados(aula);
+      aula._naFila = false;
+      atualizarLinhaAula(aula);
+      salvar();
+    }
   } finally {
-    $('#statusGeracao').classList.add('oculto');
+    rodandoFila = false;
   }
-  desenharAulas();
-  salvar();
-  return pendentes.filter(a => a.status === 'erro');
+}
+
+function filaOciosa() {
+  return new Promise(resolve => {
+    const t = setInterval(() => {
+      if (!rodandoFila && !filaTranscricao.length) { clearInterval(t); resolve(); }
+    }, 300);
+  });
 }
 
 async function garantirTranscricoes() {
-  const pendentes = projeto.aulas.filter(a =>
-    a.usar !== false && a.url && a.url.trim() && (!a.texto || a.texto.trim().length <= 50));
-  const falhas = await extrairPendentes(pendentes);
+  projeto.aulas.filter(a => a.usar !== false).forEach(a => enfileirar(a));
+  if (rodandoFila || filaTranscricao.length) {
+    $('#statusGeracao').classList.remove('oculto');
+    $('#statusTitulo').textContent = 'Extraindo transcrições (uma por vez)…';
+    $('#statusDetalhe').textContent = 'acompanhe o status em cada aula — vídeo sem legenda pode levar minutos';
+    await filaOciosa();
+    $('#statusGeracao').classList.add('oculto');
+  }
+  const falhas = projeto.aulas.filter(a => a.usar !== false && a.status === 'erro');
   if (falhas.length) {
     toast(`Não consegui extrair a transcrição de ${falhas.length} aula(s) — ${falhas[0].erro || ''} Nessas aulas, abra “colar transcrição manualmente” (ou desmarque a caixinha delas).`, true, 11000);
     return false;
@@ -273,13 +316,11 @@ async function garantirTranscricoes() {
   return true;
 }
 
-async function extrairTodas() {
+function extrairTodas() {
   const pendentes = projeto.aulas.filter(a => a.url && a.url.trim() && (!a.texto || a.texto.trim().length <= 50));
   if (!pendentes.length) { toast('Todas as aulas com link já têm transcrição.'); return; }
-  const falhas = await extrairPendentes(pendentes);
-  const ok = pendentes.length - falhas.length;
-  if (falhas.length) toast(`${ok} transcrição(ões) extraída(s); ${falhas.length} falhou(aram) — ${falhas[0].erro || ''}`, true, 10000);
-  else toast(`Prontinho: ${ok} transcrição(ões) extraída(s)! Agora gere os volumes do passo 4.`);
+  pendentes.forEach(a => enfileirar(a));
+  toast(`${pendentes.length} aula(s) na fila — uma por vez, acompanhe o status de cada uma.`);
 }
 
 function aulasProntas() {
@@ -837,7 +878,12 @@ function boot() {
     const p = JSON.parse(localStorage.getItem('cess_projeto_v1') || 'null');
     if (p) projeto = Object.assign(projeto, p);
   } catch { /* projeto novo */ }
-  projeto.aulas.forEach(a => { if (a.usar === undefined) a.usar = true; });
+  projeto.aulas.forEach(a => {
+    if (a.usar === undefined) a.usar = true;
+    delete a._naFila;
+    delete a._timerAuto;
+    if (a.status === 'fila' || a.status === 'extraindo') a.status = (a.texto && a.texto.trim()) ? 'manual' : '';
+  });
 
   // migração do formato antigo (vol1/vol2/vol3 fixos) para volumes dinâmicos
   if (!Array.isArray(projeto.volumes) || !projeto.volumes.length) {
