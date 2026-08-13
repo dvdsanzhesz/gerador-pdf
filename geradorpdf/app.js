@@ -307,12 +307,15 @@ function milhar(n) { return Number(n || 0).toLocaleString('pt-BR'); }
 /* ---------------- chamada ao Claude (backend ou direto) ---------------- */
 async function chamarClaude({ mode, onDelta, signal }) {
   const aulas = aulasProntas().map(a => ({ titulo: a.titulo, texto: a.texto }));
+  const engine = config.modo === 'gemini' ? 'gemini' : 'claude';
   const payload = {
     mode,
     courseName: projeto.nomeCurso,
     tema: projeto.tema,
     aulas,
-    model: config.modelo
+    model: config.modelo,
+    engine,
+    gemini: config.gemini || ''
   };
 
   let res = null, direto = false;
@@ -330,11 +333,24 @@ async function chamarClaude({ mode, onDelta, signal }) {
 
   // Sem backend (site estático)? Tenta o modo direto com a chave salva no navegador.
   if (!res || res.status === 404 || res.status === 405) {
+    direto = true;
+    const prompt = buildPrompt({ mode, courseName: projeto.nomeCurso, tema: projeto.tema, aulas });
+    if (engine === 'gemini') {
+      if (!config.gemini) throw new Error('Cole sua chave gratuita do Gemini em ⚙ Configurações (aistudio.google.com/apikey).');
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${encodeURIComponent(config.gemini)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: prompt.system }] },
+          contents: [{ role: 'user', parts: [{ text: prompt.user }] }],
+          generationConfig: { maxOutputTokens: Math.min(prompt.maxTokens, 65535), temperature: 0.75, responseMimeType: 'application/json' }
+        }),
+        signal
+      });
+    } else {
     if (!config.chave) {
       throw new Error('Backend não encontrado. Publique o site no Cloudflare Pages com a ANTHROPIC_API_KEY (veja o README) ou informe sua chave da API em Configurações → Avançado.');
     }
-    direto = true;
-    const prompt = buildPrompt({ mode, courseName: projeto.nomeCurso, tema: projeto.tema, aulas });
     res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -352,6 +368,7 @@ async function chamarClaude({ mode, onDelta, signal }) {
       }),
       signal
     });
+    }
   }
 
   const ct = res.headers.get('content-type') || '';
@@ -381,11 +398,17 @@ async function chamarClaude({ mode, onDelta, signal }) {
       let ev;
       try { ev = JSON.parse(raw); } catch { continue; }
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        // formato da Anthropic (Claude)
         texto += ev.delta.text;
         onDelta && onDelta(texto);
       } else if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
         stopReason = ev.delta.stop_reason;
-      } else if (ev.type === 'error') {
+      } else if (ev.candidates) {
+        // formato do Google (Gemini)
+        const t = (ev.candidates[0]?.content?.parts || []).map(p => p.text || '').join('');
+        if (t) { texto += t; onDelta && onDelta(texto); }
+        if (ev.candidates[0]?.finishReason === 'MAX_TOKENS') stopReason = 'max_tokens';
+      } else if (ev.type === 'error' || ev.error) {
         throw new Error(ev.error?.message || 'Erro no streaming da API.');
       }
     }
@@ -417,6 +440,11 @@ async function sugerirTemas() {
   if (!(await garantirTranscricoes())) return;
   if (!aulasProntas().length) { toast('Cole o link da aula (ou a transcrição) no passo 2 primeiro.', true); return; }
   if (config.modo === 'claude') { copiarPedido('temas'); return; }
+  if (config.modo === 'gemini' && !config.gemini) {
+    toast('Cole sua chave gratuita do Gemini em ⚙ Configurações primeiro (aistudio.google.com/apikey).', true, 8000);
+    abrirConfig();
+    return;
+  }
   const btn = $('#btnTemas');
   btn.disabled = true; btn.textContent = 'Pensando nos temas…';
   try {
@@ -463,6 +491,11 @@ async function gerarVolume(mode) {
   }
 
   if (config.modo === 'claude') { copiarPedido(mode); return; }
+  if (config.modo === 'gemini' && !config.gemini) {
+    toast('Cole sua chave gratuita do Gemini em ⚙ Configurações primeiro (aistudio.google.com/apikey).', true, 8000);
+    abrirConfig();
+    return;
+  }
 
   abortCtl = new AbortController();
   const meta = VOL_META[mode];
@@ -543,9 +576,16 @@ function montarColado() {
 }
 
 function atualizarModoUI() {
-  const gratis = config.modo === 'claude';
-  $('#painelColar').classList.toggle('oculto', !gratis);
-  $('#dicaModo').classList.toggle('oculto', !gratis);
+  const modo = config.modo;
+  $('#painelColar').classList.toggle('oculto', modo !== 'claude');
+  const dica = $('#dicaModo');
+  if (modo === 'gemini') {
+    dica.innerHTML = 'Tudo acontece <strong>aqui no site</strong>, de graça, com a sua chave do Gemini (a mesma da transcrição, em ⚙ Configurações). Clique no volume e aguarde: a apostila aparece no preview pronta pra salvar em PDF.';
+  } else if (modo === 'claude') {
+    dica.innerHTML = 'O botão do volume <strong>copia um pedido pronto</strong>. Cole numa conversa com o Claude e traga a resposta de volta no quadro abaixo.';
+  } else {
+    dica.innerHTML = 'Usa a API da Anthropic (paga por uso) com a <code>ANTHROPIC_API_KEY</code> configurada no Cloudflare.';
+  }
 }
 
 /* ---------------- preview / PDF ---------------- */
