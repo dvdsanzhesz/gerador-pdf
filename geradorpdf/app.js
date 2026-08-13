@@ -713,17 +713,26 @@ function marcarOverflow(frame) {
   } catch { /* sem acesso — ignora */ }
 }
 
-function salvarPDF() {
+async function salvarPDF() {
   const frame = $('#previewFrame');
   if (!frame || frame.classList.contains('oculto')) return;
   const win = frame.contentWindow;
-  const rodar = () => { win.focus(); win.print(); };
-  toast('Na janela de impressão: destino “Salvar como PDF”, margens “Nenhuma”, e ative “Gráficos de fundo”.', false, 9000);
-  if (win.document.fonts && win.document.fonts.ready) {
-    win.document.fonts.ready.then(rodar);
-  } else {
-    rodar();
+  const doc = win.document;
+
+  // espera as fotos (capa e páginas) terminarem de carregar antes de imprimir
+  const pendentes = [...doc.images].filter(i => !i.complete);
+  if (pendentes.length) {
+    toast(`Aguardando ${pendentes.length} imagem(ns) carregar(em) antes de abrir a impressão…`, false, 6000);
+    await Promise.race([
+      Promise.all(pendentes.map(i => new Promise(r => { i.addEventListener('load', r); i.addEventListener('error', r); }))),
+      new Promise(r => setTimeout(r, 25000))
+    ]);
   }
+
+  toast('Na janela de impressão: destino “Salvar como PDF”, margens “Nenhuma”, e ative “Gráficos de fundo”.', false, 9000);
+  if (doc.fonts && doc.fonts.ready) await doc.fonts.ready;
+  win.focus();
+  win.print();
 }
 
 function alternarEdicao() {
