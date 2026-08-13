@@ -670,6 +670,70 @@ function atualizarModoUI() {
   }
 }
 
+/* ---------------- fotos de alta qualidade via Gemini ---------------- */
+let modelosImagemCache = null;
+
+async function modelosImagemGemini() {
+  if (modelosImagemCache) return modelosImagemCache;
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.gemini)}&pageSize=100`);
+    if (res.ok) {
+      const data = await res.json();
+      const nomes = (data.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map(m => String(m.name || '').replace(/^models\//, ''))
+        .filter(n => /image/i.test(n) && !/embedding|veo|video|edit/i.test(n));
+      const score = n => (/flash/i.test(n) ? 0 : 1) - (/latest/i.test(n) ? 0.5 : 0);
+      modelosImagemCache = [...new Set(nomes)].sort((a, b) => score(a) - score(b)).slice(0, 4);
+    }
+  } catch { /* usa a lista fixa */ }
+  if (!modelosImagemCache || !modelosImagemCache.length) {
+    modelosImagemCache = ['gemini-2.5-flash-image', 'gemini-3-flash-image', 'gemini-flash-image-latest'];
+  }
+  return modelosImagemCache;
+}
+
+async function gerarImagemGemini(prompt, aspecto) {
+  if (!config.gemini) return null;
+  const pedido = `${prompt}. Fotografia profissional realista, luz natural quente, composição elegante e limpa, sem nenhum texto, sem marca d'água, sem logotipos.`;
+  const modelos = await modelosImagemGemini();
+  for (const modelo of modelos) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(config.gemini)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: pedido }] }],
+          generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspecto } }
+        })
+      });
+      if (!res.ok) continue; // 404 = modelo não existe; 429 = cota — tenta o próximo
+      const data = await res.json();
+      const parte = (data?.candidates?.[0]?.content?.parts || []).find(p => p.inlineData && p.inlineData.data);
+      if (parte) return `data:${parte.inlineData.mimeType || 'image/png'};base64,${parte.inlineData.data}`;
+    } catch { /* tenta o próximo modelo */ }
+  }
+  return null;
+}
+
+/* Troca as fotos de reserva pelas fotos bonitas do Gemini, direto no preview */
+async function aprimorarImagens(frame) {
+  try {
+    const doc = frame.contentDocument;
+    const imgs = [...doc.querySelectorAll('img[data-prompt]')];
+    if (!imgs.length || !config.gemini) return;
+    await Promise.all(imgs.map(async img => {
+      const dataUrl = await gerarImagemGemini(img.dataset.prompt, img.dataset.formato === 'capa' ? '3:4' : '16:9');
+      if (dataUrl) {
+        img.src = dataUrl;
+        img.style.display = '';
+        const bloco = img.closest('.bloco');
+        if (bloco) bloco.style.removeProperty('display');
+      }
+    }));
+  } catch { /* melhor esforço */ }
+}
+
 /* ---------------- preview / PDF ---------------- */
 function mostrarPreview(i) {
   const dados = projeto.apostilas[i];
@@ -689,6 +753,7 @@ function mostrarPreview(i) {
     marcarOverflow(frame);
     const doc = frame.contentDocument;
     doc.title = `${meta.prefixo}_ ${String(dados.titulo || 'Apostila').replace(/[\\/:*?"<>|]/g, '')}`;
+    frame._fotosGemini = aprimorarImagens(frame); // troca as fotos pelas do Gemini em segundo plano
   };
   $('#previewTitulo').textContent = `${meta.rotulo}: ${dados.titulo || ''}`;
   $('#btnPDF').classList.remove('oculto');
@@ -719,7 +784,13 @@ async function salvarPDF() {
   const win = frame.contentWindow;
   const doc = win.document;
 
-  // espera as fotos (capa e páginas) terminarem de carregar antes de imprimir
+  // espera as fotos do Gemini ficarem prontas (até 90s) antes de imprimir
+  if (frame._fotosGemini) {
+    toast('Finalizando as fotos em alta qualidade antes da impressão…', false, 6000);
+    await Promise.race([frame._fotosGemini, new Promise(r => setTimeout(r, 90000))]);
+  }
+
+  // e espera qualquer imagem restante terminar de carregar
   const pendentes = [...doc.images].filter(i => !i.complete);
   if (pendentes.length) {
     toast(`Aguardando ${pendentes.length} imagem(ns) carregar(em) antes de abrir a impressão…`, false, 6000);
