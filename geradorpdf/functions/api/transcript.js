@@ -232,7 +232,7 @@ async function tryPiped(videoId) {
 /* ---------------- tentativa final: Gemini transcreve o áudio (vídeo SEM legenda) ---------------- */
 
 async function tryGemini(videoId, key) {
-  const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  const modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
   const espera = ms => new Promise(r => setTimeout(r, ms));
   let erro = 'nenhum modelo Gemini disponível';
 
