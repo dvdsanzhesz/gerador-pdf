@@ -54,14 +54,10 @@
     </section>
 
     <section class="cartao">
-      <h2><span class="passo">3</span> Tema do Volume 2</h2>
-      <p class="dica">O Volume 2 é o guia complementar. Peça sugestões de temas com base nas aulas ou digite o seu.</p>
+      <h2><span class="passo">3</span> Sugestões de temas</h2>
+      <p class="dica">Peça sugestões com base nas aulas — clicar numa sugestão preenche o tema de um volume "Guia temático" do passo 4.</p>
       <button class="btn btn-suave" id="btnTemas">✦ Sugerir temas com IA</button>
       <div id="listaTemas" class="temas"></div>
-      <label class="campo">
-        <span>Tema escolhido</span>
-        <input type="text" id="temaEscolhido" placeholder="Clique numa sugestão ou digite aqui">
-      </label>
     </section>
 
     <section class="cartao">
@@ -75,20 +71,9 @@
         </select>
       </label>
       <p class="dica" id="dicaModo"></p>
-      <div class="volumes">
-        <button class="vol" data-mode="vol1">
-          <strong>Volume 1</strong>
-          <span>Principais insights da 1ª aula</span>
-        </button>
-        <button class="vol" data-mode="vol2">
-          <strong>Volume 2</strong>
-          <span>Guia do tema complementar</span>
-        </button>
-        <button class="vol" data-mode="vol3">
-          <strong>Volume 3</strong>
-          <span>Manual completo do curso</span>
-        </button>
-      </div>
+      <p class="dica">Monte quantos volumes quiser — até vários de um vídeo só. Tipos: <strong>Insights</strong> (1ª aula marcada), <strong>Guia temático</strong> (você define o tema) e <strong>Manual completo</strong> (todas as aulas marcadas).</p>
+      <div id="listaVolumes"></div>
+      <button class="btn btn-suave" id="btnAddVolume">+ Adicionar volume</button>
       <div id="statusGeracao" class="status oculto">
         <div class="spinner"></div>
         <div>
@@ -107,9 +92,6 @@
             <span>Essa resposta é de qual volume?</span>
             <select id="colarDestino">
               <option value="auto">Detectar automaticamente</option>
-              <option value="vol1">Volume 1</option>
-              <option value="vol2">Volume 2</option>
-              <option value="vol3">Volume 3</option>
             </select>
           </label>
           <button class="btn btn-primario" id="btnMontar">Montar apostila</button>
@@ -196,6 +178,24 @@
     </div>
   </form>
 </dialog>
+
+<template id="tplVolume">
+  <div class="volume-row">
+    <div class="volume-topo">
+      <span class="vol-num"></span>
+      <select class="vol-tipo">
+        <option value="insights">Insights da 1ª aula</option>
+        <option value="tema">Guia temático</option>
+        <option value="manual">Manual completo</option>
+      </select>
+      <button class="btn btn-primario vol-gerar">Gerar</button>
+      <button class="btn btn-suave vol-ver oculto" title="Reabrir esta apostila no preview">Ver</button>
+      <button class="btn btn-x vol-remover" title="Remover volume">×</button>
+    </div>
+    <input type="text" class="vol-tema oculto" placeholder="Tema deste volume (clique numa sugestão do passo 3 ou digite)">
+    <div class="vol-status"></div>
+  </div>
+</template>
 
 <template id="tplAula">
   <div class="aula">
