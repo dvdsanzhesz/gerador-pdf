@@ -231,8 +231,28 @@ async function tryPiped(videoId) {
 
 /* ---------------- tentativa final: Gemini transcreve o áudio (vídeo SEM legenda) ---------------- */
 
+/* Pergunta ao Google quais modelos a chave pode usar e prioriza os "flash" */
+async function modelosGemini(key) {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=100`, { signal: tmSignal(8000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const nomes = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => String(m.name || '').replace(/^models\//, ''))
+      .filter(n => !/embedding|imagen|veo|tts|audio|image|live|robotics|gemma|nano|exp\b/i.test(n));
+    const score = n =>
+      (/flash/i.test(n) && !/lite/i.test(n) ? 0 : /flash/i.test(n) ? 10 : 20)
+      - (/latest/i.test(n) ? 2 : 0);
+    return [...new Set(nomes)].sort((a, b) => score(a) - score(b)).slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
 async function tryGemini(videoId, key) {
-  const modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
+  let modelos = await modelosGemini(key);
+  if (!modelos.length) modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash'];
   const espera = ms => new Promise(r => setTimeout(r, ms));
   let erro = 'nenhum modelo Gemini disponível';
 
@@ -279,7 +299,7 @@ async function tryGemini(videoId, key) {
       return { text, title: '', durationSeconds: 0, language: 'pt', auto: true };
     }
   }
-  throw new Error(erro);
+  throw new Error(`${erro} [modelos testados: ${modelos.join(', ')}]`);
 }
 
 /* ---------------- rota ---------------- */
