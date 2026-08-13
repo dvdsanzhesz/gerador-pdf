@@ -34,7 +34,8 @@ body.apostila { background: #4b4e55; }
 }
 @media print {
   body.apostila { background: #fff; }
-  .sheet { margin: 0 auto; box-shadow: none; min-height: 296.8mm; }
+  /* altura EXATA + corte: nenhuma página pode transbordar e criar folha em branco */
+  .sheet { margin: 0 auto; box-shadow: none; height: 296.5mm; min-height: 296.5mm; overflow: hidden; }
 }
 @page { size: A4; margin: 0; }
 
@@ -46,7 +47,7 @@ body.apostila { background: #4b4e55; }
 }
 .sheet-header img { height: 9.2mm; width: auto; }
 
-.sheet-body { flex: 1 1 auto; padding: 1.5mm 13.5mm 5mm; display: flex; flex-direction: column; }
+.sheet-body { flex: 1 1 auto; padding: 1.5mm 13.5mm 13mm; display: flex; flex-direction: column; }
 /* mata as lacunas brancas:
    - página cheia (--esp): distribui do topo ao pé, respiro no meio
    - página semi-cheia (--semi): centraliza com respiros moderados entre os blocos
@@ -60,11 +61,14 @@ body.apostila { background: #4b4e55; }
 .pg-corpo > .bloco:last-child { margin-bottom: 0; }
 
 .sheet-footer {
-  flex: 0 0 auto;
+  /* preso no pé da folha: conteúdo pesado nunca empurra o rodapé pra outra página */
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
   padding: 3mm 10mm 4.6mm;
   text-align: center;
   font: 400 8pt/1.4 Inter, sans-serif;
   color: var(--muted);
+  background: transparent;
 }
 .sheet-footer .sep { margin: 0 1.2mm; }
 
