@@ -6,25 +6,22 @@ import { buildPrompt, buildCopyPrompt } from './prompts.js';
 
 const RODAPE_PADRAO = 'Apostila criada por Centro Educacional Sete de Setembro | Proibida a reprodução ou distribuição';
 const MODELO_PADRAO = 'claude-fable-5';
-const VOL_META = {
-  vol1: { rotulo: 'Volume 1 — Principais Insights', prefixo: 'Vol 1' },
-  vol2: { rotulo: 'Volume 2 — Guia Temático', prefixo: 'Vol 2' },
-  vol3: { rotulo: 'Volume 3 — Manual do Curso', prefixo: 'Vol 3' }
-};
+const TIPO_NOME = { insights: 'Principais Insights', tema: 'Guia Temático', manual: 'Manual do Curso' };
+const TIPO_MODE = { insights: 'vol1', tema: 'vol2', manual: 'vol3' };
 
 /* ---------------- estado ---------------- */
 let projeto = {
   nomeCurso: '',
   capaImagem: null,
-  aulas: [],            // {url, titulo, texto, status}
+  aulas: [],            // {url, titulo, texto, status, usar}
   temas: [],            // sugestões [{titulo, descricao, porque}]
-  tema: '',
-  apostilas: {}         // {vol1: dados, vol2: dados, vol3: dados}
+  volumes: [],          // [{tipo:'insights'|'tema'|'manual', tema:''}]
+  apostilas: {}         // {indiceDoVolume: dadosDaApostila}
 };
-let config = { modelo: MODELO_PADRAO, rodape: RODAPE_PADRAO, chave: '', modo: 'claude', gas: '', gemini: '' };
-let volumeAtual = null;
+let config = { modelo: MODELO_PADRAO, rodape: RODAPE_PADRAO, chave: '', modo: 'gemini', gas: '', gemini: '' };
+let volumeAtual = null;   // índice do volume aberto no preview
+let ultimoPedido = null;  // índice do último pedido copiado no modo colar
 let abortCtl = null;
-let ultimoPedido = null; // último volume copiado no modo grátis
 
 /* ---------------- helpers ---------------- */
 const $ = s => document.querySelector(s);
@@ -43,11 +40,20 @@ let salvarTimer = null;
 function salvar() {
   clearTimeout(salvarTimer);
   salvarTimer = setTimeout(() => {
-    try { localStorage.setItem('cess_projeto_v1', JSON.stringify(projeto)); } catch { /* projeto grande demais para o localStorage: segue sem persistir */ }
+    try { localStorage.setItem('cess_projeto_v1', JSON.stringify(projeto)); } catch { /* projeto grande demais: segue sem persistir */ }
   }, 400);
 }
 function salvarConfig() {
   localStorage.setItem('cess_config_v1', JSON.stringify(config));
+}
+function milhar(n) { return Number(n || 0).toLocaleString('pt-BR'); }
+
+function metaVolume(i) {
+  const v = projeto.volumes[i] || {};
+  return {
+    rotulo: `Volume ${i + 1} — ${TIPO_NOME[v.tipo] || 'Apostila'}`,
+    prefixo: `Vol ${i + 1}`
+  };
 }
 
 /* ---------------- aulas ---------------- */
@@ -137,7 +143,7 @@ function atualizarStatusAula(el, aula) {
     el.textContent = `✔ Transcrição extraída${aula.titulo ? ` — “${aula.titulo}”` : ''} (${milhar(aula.texto.length)} caracteres${aula.auto ? ', legenda automática' : ''})`;
   } else if (aula.status === 'manual') {
     el.classList.add('ok');
-    el.textContent = `✔ Transcrição colada manualmente (${milhar(aula.texto.length)} caracteres)`;
+    el.textContent = `✔ Transcrição pronta (${milhar(aula.texto.length)} caracteres)`;
   } else if (aula.status === 'erro') {
     el.classList.add('err');
     el.textContent = `✖ ${aula.erro || 'Falha na extração — cole manualmente abaixo.'}`;
@@ -146,7 +152,7 @@ function atualizarStatusAula(el, aula) {
   }
 }
 
-/* Espelhos que o próprio NAVEGADOR consulta (usa o IP da sua casa — plano C) */
+/* ---------------- extração de transcrição ---------------- */
 const ESPELHOS_NAVEGADOR = ['https://yewtu.be', 'https://id.420129.xyz', 'https://inv.nadeko.net'];
 
 function videoIdDe(url) {
@@ -194,7 +200,6 @@ async function espelhoNavegador(videoId) {
 
 async function puxarTranscricaoDados(aula) {
   let erroBackend = '';
-  // Plano A e B: o backend tenta o YouTube direto e os espelhos pelo servidor
   try {
     const res = await fetch('api/transcript', {
       method: 'POST',
@@ -215,7 +220,6 @@ async function puxarTranscricaoDados(aula) {
     erroBackend = e.message;
   }
 
-  // Plano C: o próprio navegador consulta os espelhos (IP residencial, menos bloqueado)
   const vid = videoIdDe(aula.url);
   if (vid) {
     const alt = await espelhoNavegador(vid);
@@ -243,12 +247,11 @@ async function puxarTranscricao(aula, statusEl, rootEl) {
   if (aula.status === 'erro') rootEl.querySelector('.aula-manual').open = true;
 }
 
-/* Extrai a transcrição de um conjunto de aulas, com painel de progresso */
 async function extrairPendentes(pendentes) {
   if (!pendentes.length) return [];
   $('#statusGeracao').classList.remove('oculto');
   $('#statusTitulo').textContent = 'Extraindo transcrições do YouTube…';
-  $('#statusDetalhe').textContent = `${pendentes.length} aula(s) — isso leva alguns segundos`;
+  $('#statusDetalhe').textContent = `${pendentes.length} aula(s) — vídeo sem legenda pode levar 1 a 3 min (IA transcrevendo)`;
   try {
     await Promise.all(pendentes.map(a => puxarTranscricaoDados(a)));
   } finally {
@@ -259,7 +262,6 @@ async function extrairPendentes(pendentes) {
   return pendentes.filter(a => a.status === 'erro');
 }
 
-/* Antes de gerar: puxa sozinho a transcrição das aulas MARCADAS que só têm o link */
 async function garantirTranscricoes() {
   const pendentes = projeto.aulas.filter(a =>
     a.usar !== false && a.url && a.url.trim() && (!a.texto || a.texto.trim().length <= 50));
@@ -271,21 +273,20 @@ async function garantirTranscricoes() {
   return true;
 }
 
-/* Botão "Extrair todas": puxa a transcrição de TODAS as aulas com link */
 async function extrairTodas() {
   const pendentes = projeto.aulas.filter(a => a.url && a.url.trim() && (!a.texto || a.texto.trim().length <= 50));
   if (!pendentes.length) { toast('Todas as aulas com link já têm transcrição.'); return; }
   const falhas = await extrairPendentes(pendentes);
   const ok = pendentes.length - falhas.length;
   if (falhas.length) toast(`${ok} transcrição(ões) extraída(s); ${falhas.length} falhou(aram) — ${falhas[0].erro || ''}`, true, 10000);
-  else toast(`Prontinho: ${ok} transcrição(ões) extraída(s)! Marque as aulas que entram na apostila e gere o volume.`);
+  else toast(`Prontinho: ${ok} transcrição(ões) extraída(s)! Agora gere os volumes do passo 4.`);
 }
 
 function aulasProntas() {
   return projeto.aulas.filter(a => a.usar !== false && a.texto && a.texto.trim().length > 50);
 }
 
-/* Limpa arquivos .srt/.vtt: remove numeração, timestamps e tags, e junta o texto */
+/* Limpa arquivos .srt/.vtt */
 function limparLegenda(texto, nomeArquivo = '') {
   if (!/\.(srt|vtt)$/i.test(nomeArquivo) && !/-->/.test(texto)) return texto.trim();
   const linhas = String(texto).split(/\r?\n/);
@@ -294,31 +295,101 @@ function limparLegenda(texto, nomeArquivo = '') {
     const t = l.trim();
     if (!t) continue;
     if (/^WEBVTT/i.test(t) || /^(Kind|Language|NOTE|STYLE)[:\s]/i.test(t)) continue;
-    if (/^\d+$/.test(t)) continue;                    // número de sequência
-    if (/-->/.test(t)) continue;                      // linha de tempo
-    const limpo = t.replace(/<[^>]+>/g, '').trim();   // tags <c>, <i> etc.
+    if (/^\d+$/.test(t)) continue;
+    if (/-->/.test(t)) continue;
+    const limpo = t.replace(/<[^>]+>/g, '').trim();
     if (limpo && limpo !== uteis[uteis.length - 1]) uteis.push(limpo);
   }
   return uteis.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
 
-function milhar(n) { return Number(n || 0).toLocaleString('pt-BR'); }
+/* ---------------- volumes (quantos quiser) ---------------- */
+function novoVolume(dados = {}) {
+  projeto.volumes.push({ tipo: 'tema', tema: '', ...dados });
+  desenharVolumes();
+  salvar();
+}
 
-/* ---------------- chamada ao Claude (backend ou direto) ---------------- */
-async function chamarClaude({ mode, onDelta, signal }) {
+function desenharVolumes() {
+  const lista = $('#listaVolumes');
+  lista.innerHTML = '';
+  projeto.volumes.forEach((vol, i) => {
+    const node = $('#tplVolume').content.cloneNode(true);
+    node.querySelector('.vol-num').textContent = i + 1;
+    const selTipo = node.querySelector('.vol-tipo');
+    const inpTema = node.querySelector('.vol-tema');
+    const status = node.querySelector('.vol-status');
+    const btnVer = node.querySelector('.vol-ver');
+    const btnGerar = node.querySelector('.vol-gerar');
+
+    selTipo.value = vol.tipo;
+    inpTema.value = vol.tema || '';
+    inpTema.classList.toggle('oculto', vol.tipo !== 'tema');
+
+    const atualizarStatus = () => {
+      if (projeto.apostilas[i]) {
+        status.textContent = `✔ gerada: ${projeto.apostilas[i].titulo || ''}`;
+        status.className = 'vol-status ok';
+        btnVer.classList.remove('oculto');
+        btnGerar.textContent = 'Regerar';
+      } else {
+        status.textContent = '';
+        status.className = 'vol-status';
+        btnVer.classList.add('oculto');
+        btnGerar.textContent = 'Gerar';
+      }
+    };
+    atualizarStatus();
+
+    selTipo.addEventListener('change', () => {
+      vol.tipo = selTipo.value;
+      inpTema.classList.toggle('oculto', vol.tipo !== 'tema');
+      salvar();
+    });
+    inpTema.addEventListener('input', () => { vol.tema = inpTema.value; salvar(); });
+    btnGerar.addEventListener('click', () => gerarVolumeIdx(i));
+    btnVer.addEventListener('click', () => mostrarPreview(i));
+    node.querySelector('.vol-remover').addEventListener('click', () => {
+      projeto.volumes.splice(i, 1);
+      const novas = {};
+      Object.keys(projeto.apostilas).forEach(k => {
+        const n = Number(k);
+        if (n < i) novas[n] = projeto.apostilas[k];
+        else if (n > i) novas[n - 1] = projeto.apostilas[k];
+      });
+      projeto.apostilas = novas;
+      if (!projeto.volumes.length) novoVolume({ tipo: 'insights' });
+      desenharVolumes();
+      salvar();
+    });
+    lista.appendChild(node);
+  });
+
+  // opções do "colar resposta" acompanham os volumes
+  const sel = $('#colarDestino');
+  if (sel) {
+    const atual = sel.value;
+    sel.innerHTML = '<option value="auto">Detectar automaticamente</option>' +
+      projeto.volumes.map((v, i) => `<option value="${i}">Volume ${i + 1} — ${TIPO_NOME[v.tipo]}</option>`).join('');
+    if ([...sel.options].some(o => o.value === atual)) sel.value = atual;
+  }
+}
+
+/* ---------------- chamada à IA (backend ou direto) ---------------- */
+async function chamarIA({ mode, tema, onDelta, signal }) {
   const aulas = aulasProntas().map(a => ({ titulo: a.titulo, texto: a.texto }));
   const engine = config.modo === 'gemini' ? 'gemini' : 'claude';
   const payload = {
     mode,
     courseName: projeto.nomeCurso,
-    tema: projeto.tema,
+    tema: tema || '',
     aulas,
     model: config.modelo,
     engine,
     gemini: config.gemini || ''
   };
 
-  let res = null, direto = false;
+  let res = null;
   try {
     res = await fetch('api/generate', {
       method: 'POST',
@@ -331,10 +402,9 @@ async function chamarClaude({ mode, onDelta, signal }) {
     res = null;
   }
 
-  // Sem backend (site estático)? Tenta o modo direto com a chave salva no navegador.
+  // Sem backend? Modo direto no navegador.
   if (!res || res.status === 404 || res.status === 405) {
-    direto = true;
-    const prompt = buildPrompt({ mode, courseName: projeto.nomeCurso, tema: projeto.tema, aulas });
+    const prompt = buildPrompt({ mode, courseName: projeto.nomeCurso, tema, aulas });
     if (engine === 'gemini') {
       if (!config.gemini) throw new Error('Cole sua chave gratuita do Gemini em ⚙ Configurações (aistudio.google.com/apikey).');
       res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:streamGenerateContent?alt=sse&key=${encodeURIComponent(config.gemini)}`, {
@@ -348,26 +418,26 @@ async function chamarClaude({ mode, onDelta, signal }) {
         signal
       });
     } else {
-    if (!config.chave) {
-      throw new Error('Backend não encontrado. Publique o site no Cloudflare Pages com a ANTHROPIC_API_KEY (veja o README) ou informe sua chave da API em Configurações → Avançado.');
-    }
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': config.chave,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: config.modelo || MODELO_PADRAO,
-        max_tokens: prompt.maxTokens,
-        stream: true,
-        system: prompt.system,
-        messages: [{ role: 'user', content: prompt.user }]
-      }),
-      signal
-    });
+      if (!config.chave) {
+        throw new Error('Backend não encontrado. Publique o site no Cloudflare (veja o README) ou informe sua chave em Configurações → Avançado.');
+      }
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': config.chave,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: config.modelo || MODELO_PADRAO,
+          max_tokens: prompt.maxTokens,
+          stream: true,
+          system: prompt.system,
+          messages: [{ role: 'user', content: prompt.user }]
+        }),
+        signal
+      });
     }
   }
 
@@ -381,7 +451,6 @@ async function chamarClaude({ mode, onDelta, signal }) {
     throw new Error(msg);
   }
 
-  // Lê o SSE
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buffer = '', texto = '', stopReason = '';
@@ -398,13 +467,11 @@ async function chamarClaude({ mode, onDelta, signal }) {
       let ev;
       try { ev = JSON.parse(raw); } catch { continue; }
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-        // formato da Anthropic (Claude)
-        texto += ev.delta.text;
+        texto += ev.delta.text;                       // formato Anthropic
         onDelta && onDelta(texto);
       } else if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
         stopReason = ev.delta.stop_reason;
-      } else if (ev.candidates) {
-        // formato do Google (Gemini)
+      } else if (ev.candidates) {                     // formato Gemini
         const t = (ev.candidates[0]?.content?.parts || []).map(p => p.text || '').join('');
         if (t) { texto += t; onDelta && onDelta(texto); }
         if (ev.candidates[0]?.finishReason === 'MAX_TOKENS') stopReason = 'max_tokens';
@@ -414,9 +481,9 @@ async function chamarClaude({ mode, onDelta, signal }) {
     }
   }
   if (stopReason === 'max_tokens') {
-    throw new Error('A resposta atingiu o limite de tokens antes de terminar. Tente novamente (ou divida o curso em menos aulas por volume).');
+    throw new Error('A resposta atingiu o limite de tokens antes de terminar. Tente novamente.');
   }
-  return { texto, direto };
+  return { texto };
 }
 
 function extrairJSON(txt) {
@@ -429,9 +496,8 @@ function extrairJSON(txt) {
   try {
     return JSON.parse(bruto);
   } catch {
-    // tenta remover vírgulas penduradas comuns
     try { return JSON.parse(bruto.replace(/,\s*([}\]])/g, '$1')); }
-    catch { throw new Error('O JSON gerado veio com defeito. Clique de novo no volume para regenerar.'); }
+    catch { throw new Error('O JSON gerado veio com defeito. Clique de novo em Gerar.'); }
   }
 }
 
@@ -448,12 +514,12 @@ async function sugerirTemas() {
   const btn = $('#btnTemas');
   btn.disabled = true; btn.textContent = 'Pensando nos temas…';
   try {
-    const { texto } = await chamarClaude({ mode: 'temas' });
+    const { texto } = await chamarIA({ mode: 'temas' });
     const data = extrairJSON(texto);
     projeto.temas = data.temas || [];
     desenharTemas();
     salvar();
-    toast('Temas sugeridos! Clique em um para escolher.');
+    toast('Temas sugeridos! Clique em um para preencher um volume "Guia temático".');
   } catch (e) {
     toast(e.message, true, 9000);
   } finally {
@@ -467,30 +533,35 @@ function desenharTemas() {
   projeto.temas.forEach(t => {
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'tema' + (projeto.tema === t.titulo ? ' ativo' : '');
+    chip.className = 'tema';
     chip.textContent = t.titulo;
     chip.title = `${t.descricao || ''}\n${t.porque || ''}`.trim();
     chip.addEventListener('click', () => {
-      projeto.tema = t.titulo;
-      $('#temaEscolhido').value = t.titulo;
-      desenharTemas();
+      let alvo = projeto.volumes.findIndex(v => v.tipo === 'tema' && !String(v.tema || '').trim());
+      if (alvo < 0) {
+        projeto.volumes.push({ tipo: 'tema', tema: '' });
+        alvo = projeto.volumes.length - 1;
+      }
+      projeto.volumes[alvo].tema = t.titulo;
+      desenharVolumes();
       salvar();
+      toast(`Tema aplicado no Volume ${alvo + 1}.`);
     });
     box.appendChild(chip);
   });
 }
 
 /* ---------------- geração dos volumes ---------------- */
-async function gerarVolume(mode) {
+async function gerarVolumeIdx(i) {
+  const vol = projeto.volumes[i];
+  if (!vol) return;
   if (!(await garantirTranscricoes())) return;
-  const prontas = aulasProntas();
-  if (!prontas.length) { toast('Cole o link da aula (ou a transcrição) no passo 2 primeiro.', true); return; }
-  if (mode === 'vol2') {
-    projeto.tema = $('#temaEscolhido').value.trim();
-    if (!projeto.tema) { toast('Escolha ou digite o tema do Volume 2 (passo 3).', true); return; }
+  if (!aulasProntas().length) { toast('Cole o link da aula (ou a transcrição) no passo 2 primeiro.', true); return; }
+  if (vol.tipo === 'tema' && !String(vol.tema || '').trim()) {
+    toast(`Defina o tema do Volume ${i + 1} (clique numa sugestão do passo 3 ou digite no campo).`, true, 7000);
+    return;
   }
-
-  if (config.modo === 'claude') { copiarPedido(mode); return; }
+  if (config.modo === 'claude') { copiarPedido(i); return; }
   if (config.modo === 'gemini' && !config.gemini) {
     toast('Cole sua chave gratuita do Gemini em ⚙ Configurações primeiro (aistudio.google.com/apikey).', true, 8000);
     abrirConfig();
@@ -498,15 +569,16 @@ async function gerarVolume(mode) {
   }
 
   abortCtl = new AbortController();
-  const meta = VOL_META[mode];
-  $$('.vol').forEach(b => b.disabled = true);
+  const meta = metaVolume(i);
+  $$('.vol-gerar').forEach(b => b.disabled = true);
   $('#statusGeracao').classList.remove('oculto');
   $('#statusTitulo').textContent = `Gerando ${meta.rotulo}…`;
-  $('#statusDetalhe').textContent = 'Enviando as aulas para o Claude…';
+  $('#statusDetalhe').textContent = 'Enviando as aulas para a IA…';
 
   try {
-    const { texto } = await chamarClaude({
-      mode,
+    const { texto } = await chamarIA({
+      mode: TIPO_MODE[vol.tipo],
+      tema: vol.tema,
       signal: abortCtl.signal,
       onDelta: t => {
         $('#statusDetalhe').textContent = `${milhar(t.length)} caracteres gerados · ~${Math.max(1, Math.round(t.length / 2400))} páginas`;
@@ -514,30 +586,38 @@ async function gerarVolume(mode) {
     });
     const dados = extrairJSON(texto);
     if (!dados.paginas || !dados.paginas.length) throw new Error('A apostila veio sem páginas. Gere novamente.');
-    projeto.apostilas[mode] = dados;
+    projeto.apostilas[i] = dados;
     salvar();
-    mostrarPreview(mode);
+    desenharVolumes();
+    mostrarPreview(i);
     toast(`${meta.rotulo} pronta! Revise o preview e clique em “Salvar PDF”.`);
   } catch (e) {
     if (e.name !== 'AbortError') toast(e.message, true, 10000);
   } finally {
     $('#statusGeracao').classList.add('oculto');
-    $$('.vol').forEach(b => b.disabled = false);
+    $$('.vol-gerar').forEach(b => b.disabled = false);
     abortCtl = null;
   }
 }
 
-/* ---------------- modo grátis (copiar/colar no app do Claude) ---------------- */
-async function copiarPedido(mode) {
+/* ---------------- modo copiar/colar no app do Claude ---------------- */
+async function copiarPedido(destino) {
   const aulas = aulasProntas().map(a => ({ titulo: a.titulo, texto: a.texto }));
-  const texto = buildCopyPrompt({ mode, courseName: projeto.nomeCurso, tema: projeto.tema, aulas });
-  ultimoPedido = mode;
-  if (mode !== 'temas') $('#colarDestino').value = 'auto';
+  const ehTemas = destino === 'temas';
+  const vol = ehTemas ? null : projeto.volumes[destino];
+  const texto = buildCopyPrompt({
+    mode: ehTemas ? 'temas' : TIPO_MODE[vol.tipo],
+    courseName: projeto.nomeCurso,
+    tema: vol ? vol.tema : '',
+    aulas
+  });
+  ultimoPedido = destino;
+  if (!ehTemas) $('#colarDestino').value = 'auto';
 
-  const nome = mode === 'temas' ? 'sugestão de temas' : VOL_META[mode].rotulo;
+  const nome = ehTemas ? 'sugestão de temas' : metaVolume(destino).rotulo;
   try {
     await navigator.clipboard.writeText(texto);
-    toast(`Pedido de ${nome} copiado! Agora: abra uma conversa com o Claude (app ou claude.ai), cole (Ctrl+V) e envie. Quando ele responder, copie a resposta e cole no quadro "Modo grátis" aqui embaixo.`, false, 12000);
+    toast(`Pedido de ${nome} copiado! Cole numa conversa com o Claude (app ou claude.ai) e envie. Quando ele responder, copie a resposta e cole no quadro "Modo grátis" aqui embaixo.`, false, 12000);
   } catch {
     $('#txtCopiar').value = texto;
     $('#modalCopiar').showModal();
@@ -552,27 +632,29 @@ function montarColado() {
   try { dados = extrairJSON(bruto); }
   catch (e) { toast(e.message, true, 8000); return; }
 
-  // resposta de temas?
   if (dados.temas) {
     projeto.temas = dados.temas;
     desenharTemas();
     salvar();
     $('#colarJson').value = '';
-    toast('Temas montados! Clique em um para escolher (passo 3).');
+    toast('Temas montados! Clique em um para preencher um volume "Guia temático".');
     return;
   }
 
   if (!dados.paginas || !dados.paginas.length) {
-    toast('Essa resposta não tem páginas de apostila. Confira se você copiou a resposta inteira do Claude.', true, 8000);
+    toast('Essa resposta não tem páginas de apostila. Confira se você copiou a resposta inteira.', true, 8000);
     return;
   }
   let destino = $('#colarDestino').value;
-  if (destino === 'auto') destino = (ultimoPedido && ultimoPedido !== 'temas') ? ultimoPedido : 'vol1';
+  if (destino === 'auto') destino = (ultimoPedido != null && ultimoPedido !== 'temas') ? ultimoPedido : 0;
+  destino = Number(destino);
+  if (!projeto.volumes[destino]) destino = 0;
   projeto.apostilas[destino] = dados;
   salvar();
+  desenharVolumes();
   $('#colarJson').value = '';
   mostrarPreview(destino);
-  toast(`${VOL_META[destino].rotulo} montada! Revise o preview e clique em “Salvar PDF”.`);
+  toast(`${metaVolume(destino).rotulo} montada! Revise o preview e clique em “Salvar PDF”.`);
 }
 
 function atualizarModoUI() {
@@ -580,20 +662,20 @@ function atualizarModoUI() {
   $('#painelColar').classList.toggle('oculto', modo !== 'claude');
   const dica = $('#dicaModo');
   if (modo === 'gemini') {
-    dica.innerHTML = 'Tudo acontece <strong>aqui no site</strong>, de graça, com a sua chave do Gemini (a mesma da transcrição, em ⚙ Configurações). Clique no volume e aguarde: a apostila aparece no preview pronta pra salvar em PDF.';
+    dica.innerHTML = 'Tudo acontece <strong>aqui no site</strong>, de graça, com a sua chave do Gemini (⚙ Configurações). Clique em Gerar e aguarde: a apostila aparece no preview pronta pra salvar em PDF.';
   } else if (modo === 'claude') {
-    dica.innerHTML = 'O botão do volume <strong>copia um pedido pronto</strong>. Cole numa conversa com o Claude e traga a resposta de volta no quadro abaixo.';
+    dica.innerHTML = 'O botão Gerar <strong>copia um pedido pronto</strong>. Cole numa conversa com o Claude e traga a resposta de volta no quadro abaixo.';
   } else {
     dica.innerHTML = 'Usa a API da Anthropic (paga por uso) com a <code>ANTHROPIC_API_KEY</code> configurada no Cloudflare.';
   }
 }
 
 /* ---------------- preview / PDF ---------------- */
-function mostrarPreview(mode) {
-  const dados = projeto.apostilas[mode];
+function mostrarPreview(i) {
+  const dados = projeto.apostilas[i];
   if (!dados) return;
-  volumeAtual = mode;
-  const meta = VOL_META[mode];
+  volumeAtual = i;
+  const meta = metaVolume(i);
   const html = renderApostilaHTML(dados, {
     rodape: config.rodape || RODAPE_PADRAO,
     capaImagem: projeto.capaImagem,
@@ -620,7 +702,7 @@ function marcarOverflow(frame) {
     const doc = frame.contentDocument;
     doc.querySelectorAll('.aviso-overflow').forEach(e => e.remove());
     doc.querySelectorAll('.sheet').forEach((sheet, i) => {
-      if (i === 0) return; // capa
+      if (i === 0) return;
       if (sheet.scrollHeight > sheet.clientHeight + 8) {
         const badge = doc.createElement('div');
         badge.className = 'aviso-overflow';
@@ -670,20 +752,37 @@ function abrirConfig() {
 function boot() {
   try { Object.assign(config, JSON.parse(localStorage.getItem('cess_config_v1') || '{}')); } catch { /* config nova */ }
   if (!config.rodape) config.rodape = RODAPE_PADRAO;
+  if (!config.modo) config.modo = 'gemini';
   try {
     const p = JSON.parse(localStorage.getItem('cess_projeto_v1') || 'null');
     if (p) projeto = Object.assign(projeto, p);
   } catch { /* projeto novo */ }
   projeto.aulas.forEach(a => { if (a.usar === undefined) a.usar = true; });
 
+  // migração do formato antigo (vol1/vol2/vol3 fixos) para volumes dinâmicos
+  if (!Array.isArray(projeto.volumes) || !projeto.volumes.length) {
+    projeto.volumes = [
+      { tipo: 'insights', tema: '' },
+      { tipo: 'tema', tema: projeto.tema || '' },
+      { tipo: 'manual', tema: '' }
+    ];
+    const antigas = projeto.apostilas || {};
+    const novas = {};
+    if (antigas.vol1) novas[0] = antigas.vol1;
+    if (antigas.vol2) novas[1] = antigas.vol2;
+    if (antigas.vol3) novas[2] = antigas.vol3;
+    if (Object.keys(novas).length) projeto.apostilas = novas;
+  }
+  if (!projeto.apostilas || Array.isArray(projeto.apostilas)) projeto.apostilas = {};
+
   $('#nomeCurso').value = projeto.nomeCurso;
-  $('#temaEscolhido').value = projeto.tema || '';
-  if (!projeto.aulas.length) projeto.aulas.push({ url: '', titulo: '', texto: '', status: '' });
+  if (!projeto.aulas.length) projeto.aulas.push({ url: '', titulo: '', texto: '', status: '', usar: true });
   desenharAulas();
+  desenharVolumes();
   desenharTemas();
   if (projeto.capaImagem) mostrarCapaMini();
 
-  $('#modoGeracao').value = config.modo || 'claude';
+  $('#modoGeracao').value = config.modo;
   atualizarModoUI();
   $('#modoGeracao').addEventListener('change', e => {
     config.modo = e.target.value;
@@ -700,7 +799,6 @@ function boot() {
   });
 
   $('#nomeCurso').addEventListener('input', e => { projeto.nomeCurso = e.target.value; salvar(); });
-  $('#temaEscolhido').addEventListener('input', e => { projeto.tema = e.target.value; desenharTemas(); salvar(); });
   $('#btnAddAula').addEventListener('click', () => novaAula());
   $('#btnExtrairTodas').addEventListener('click', extrairTodas);
   $('#chkTodas').addEventListener('change', e => {
@@ -708,8 +806,8 @@ function boot() {
     desenharAulas();
     salvar();
   });
+  $('#btnAddVolume').addEventListener('click', () => novoVolume());
   $('#btnTemas').addEventListener('click', sugerirTemas);
-  $$('.vol').forEach(b => b.addEventListener('click', () => gerarVolume(b.dataset.mode)));
   $('#btnCancelar').addEventListener('click', () => abortCtl && abortCtl.abort());
   $('#btnPDF').addEventListener('click', salvarPDF);
   $('#btnEditar').addEventListener('click', alternarEdicao);
@@ -739,7 +837,7 @@ function boot() {
       projeto.capaImagem = rd.result;
       mostrarCapaMini();
       salvar();
-      if (volumeAtual) mostrarPreview(volumeAtual);
+      if (volumeAtual != null) mostrarPreview(volumeAtual);
     };
     rd.readAsDataURL(file);
   });
@@ -748,12 +846,11 @@ function boot() {
     $('#capaPreview').classList.add('oculto');
     $('#fotoCapa').value = '';
     salvar();
-    if (volumeAtual) mostrarPreview(volumeAtual);
+    if (volumeAtual != null) mostrarPreview(volumeAtual);
   });
 
-  // reabre a última apostila gerada, se houver
-  const ultimo = ['vol3', 'vol2', 'vol1'].find(m => projeto.apostilas && projeto.apostilas[m]);
-  if (ultimo) mostrarPreview(ultimo);
+  const ultimo = Object.keys(projeto.apostilas).map(Number).sort((a, b) => b - a)[0];
+  if (ultimo != null && projeto.apostilas[ultimo]) mostrarPreview(ultimo);
 }
 
 function mostrarCapaMini() {
