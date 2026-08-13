@@ -69,11 +69,12 @@
       <label class="campo">
         <span>Como gerar?</span>
         <select id="modoGeracao">
+          <option value="gemini">Grátis — tudo aqui no site (Gemini)</option>
           <option value="claude">Grátis — pelo app do Claude (copiar e colar)</option>
-          <option value="api">Automático — backend com chave da API</option>
+          <option value="api">Automático — API da Anthropic (pago)</option>
         </select>
       </label>
-      <p class="dica" id="dicaModo">No modo grátis, o botão do volume <strong>copia um pedido pronto</strong>. Cole numa conversa com o Claude e traga a resposta de volta no quadro abaixo.</p>
+      <p class="dica" id="dicaModo"></p>
       <div class="volumes">
         <button class="vol" data-mode="vol1">
           <strong>Volume 1</strong>
