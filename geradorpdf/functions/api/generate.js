@@ -43,30 +43,35 @@ export async function onRequestPost(context) {
     });
 
     const espera = ms => new Promise(r => setTimeout(r, ms));
-    const modelos = mode === 'temas'
-      ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
-      : ['gemini-2.5-flash', 'gemini-2.5-flash'];  // volumes: insiste no modelo bom
+    // "latest" aponta sempre pro modelo vigente — os demais são reservas; 404 = pula pro próximo
+    const modelos = ['gemini-flash-latest', 'gemini-3-flash', 'gemini-2.5-flash', 'gemini-flash-lite-latest'];
 
     let ultimo = '';
-    for (let i = 0; i < modelos.length; i++) {
-      if (i > 0) await espera(3000);
-      const upstream = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelos[i]}:streamGenerateContent?alt=sse&key=${encodeURIComponent(gKey)}`,
-        { method: 'POST', headers: { 'content-type': 'application/json' }, body: gPayload }
-      );
-      if (upstream.status === 503 || upstream.status === 429) { ultimo = `Gemini lotado (HTTP ${upstream.status})`; continue; }
-      if (!upstream.ok) {
-        let detalhe = '';
-        try { detalhe = (await upstream.json())?.error?.message || ''; } catch { /* sem detalhe */ }
-        return erro(`Erro do Gemini (${upstream.status}): ${detalhe || 'verifique a chave em ⚙ Configurações.'}`, 502);
-      }
-      return new Response(upstream.body, {
-        headers: {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache',
-          'X-Accel-Buffering': 'no'
+    for (const modelo of modelos) {
+      for (let vez = 0; vez < 2; vez++) {
+        const upstream = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:streamGenerateContent?alt=sse&key=${encodeURIComponent(gKey)}`,
+          { method: 'POST', headers: { 'content-type': 'application/json' }, body: gPayload }
+        );
+        if (upstream.status === 404) { ultimo = `modelo ${modelo} indisponível`; break; } // próximo modelo
+        if (upstream.status === 503 || upstream.status === 429) {
+          ultimo = `Gemini lotado (HTTP ${upstream.status})`;
+          await espera(3000);
+          continue; // re-tenta o mesmo modelo; persistindo, cai pro próximo
         }
-      });
+        if (!upstream.ok) {
+          let detalhe = '';
+          try { detalhe = (await upstream.json())?.error?.message || ''; } catch { /* sem detalhe */ }
+          return erro(`Erro do Gemini (${upstream.status}): ${detalhe || 'verifique a chave em ⚙ Configurações.'}`, 502);
+        }
+        return new Response(upstream.body, {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+          }
+        });
+      }
     }
     return erro(`${ultimo || 'Gemini indisponível'} — tente de novo em alguns minutos.`, 503);
   }
