@@ -337,7 +337,7 @@ async function chamarClaude({ mode, onDelta, signal }) {
     const prompt = buildPrompt({ mode, courseName: projeto.nomeCurso, tema: projeto.tema, aulas });
     if (engine === 'gemini') {
       if (!config.gemini) throw new Error('Cole sua chave gratuita do Gemini em ⚙ Configurações (aistudio.google.com/apikey).');
-      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${encodeURIComponent(config.gemini)}`, {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:streamGenerateContent?alt=sse&key=${encodeURIComponent(config.gemini)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
