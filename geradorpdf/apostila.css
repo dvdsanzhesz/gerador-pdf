@@ -47,10 +47,16 @@ body.apostila { background: #4b4e55; }
 .sheet-header img { height: 9.2mm; width: auto; }
 
 .sheet-body { flex: 1 1 auto; padding: 1.5mm 13.5mm 5mm; display: flex; flex-direction: column; }
-/* mata as lacunas brancas: página com 1 bloco centraliza; com 2+ blocos, o conteúdo
-   se distribui do topo ao pé da página (o respiro fica NO MEIO, entre os blocos) */
+/* mata as lacunas brancas:
+   - página cheia (--esp): distribui do topo ao pé, respiro no meio
+   - página semi-cheia (--semi): centraliza com respiros moderados entre os blocos
+   - página mínima: só centraliza */
 .pg-corpo { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
 .pg-corpo--esp { justify-content: space-between; padding-bottom: 6mm; }
+.pg-corpo--semi { justify-content: center; }
+.pg-corpo--semi .bloco { margin-bottom: 9.5mm; }
+.pg-corpo--semi .pg-titulo { margin-bottom: 8mm; }
+.pg-corpo--semi .pg-sub { margin: 6mm 0 5.5mm; }
 .pg-corpo > .bloco:last-child { margin-bottom: 0; }
 
 .sheet-footer {
@@ -70,7 +76,7 @@ body.apostila { background: #4b4e55; }
 }
 .capa-overlay {
   position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(23,21,19,.42) 0%, rgba(23,21,19,.5) 45%, rgba(23,21,19,.62) 100%);
+  background: linear-gradient(180deg, rgba(23,21,19,.58) 0%, rgba(23,21,19,.66) 45%, rgba(23,21,19,.76) 100%);
 }
 .capa-foto {
   position: absolute; inset: 0;
