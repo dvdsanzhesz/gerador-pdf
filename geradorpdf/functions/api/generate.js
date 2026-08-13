@@ -23,7 +23,7 @@ export async function onRequestPost(context) {
   let body;
   try { body = await context.request.json(); } catch { return erro('JSON inválido'); }
 
-  const { mode, courseName, tema, aulas, model } = body || {};
+  const { mode, courseName, tema, aulas, model, engine } = body || {};
   if (!mode || !['vol1', 'vol2', 'vol3', 'temas'].includes(mode)) return erro('mode inválido');
   if (!Array.isArray(aulas) || !aulas.length || !aulas.some(a => a && a.texto && a.texto.trim().length > 50)) {
     return erro('Nenhuma transcrição de aula recebida.');
@@ -31,6 +31,52 @@ export async function onRequestPost(context) {
   if (mode === 'vol2' && !tema) return erro('Escolha ou digite um tema para o Volume 2.');
 
   const prompt = buildPrompt({ mode, courseName, tema, aulas });
+
+  /* ============ Motor GEMINI (grátis — "tudo no site") ============ */
+  if (engine === 'gemini') {
+    const gKey = String(body.gemini || context.env.GEMINI_API_KEY || '').trim();
+    if (!gKey) return erro('Chave do Gemini não configurada. Cole sua chave gratuita em ⚙ Configurações (aistudio.google.com/apikey).');
+
+    const gPayload = JSON.stringify({
+      systemInstruction: { parts: [{ text: prompt.system }] },
+      contents: [{ role: 'user', parts: [{ text: prompt.user }] }],
+      generationConfig: {
+        maxOutputTokens: Math.min(prompt.maxTokens, 65535),
+        temperature: 0.75,
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const espera = ms => new Promise(r => setTimeout(r, ms));
+    const modelos = mode === 'temas'
+      ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+      : ['gemini-2.5-flash', 'gemini-2.5-flash'];  // volumes: insiste no modelo bom
+
+    let ultimo = '';
+    for (let i = 0; i < modelos.length; i++) {
+      if (i > 0) await espera(3000);
+      const upstream = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelos[i]}:streamGenerateContent?alt=sse&key=${encodeURIComponent(gKey)}`,
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: gPayload }
+      );
+      if (upstream.status === 503 || upstream.status === 429) { ultimo = `Gemini lotado (HTTP ${upstream.status})`; continue; }
+      if (!upstream.ok) {
+        let detalhe = '';
+        try { detalhe = (await upstream.json())?.error?.message || ''; } catch { /* sem detalhe */ }
+        return erro(`Erro do Gemini (${upstream.status}): ${detalhe || 'verifique a chave em ⚙ Configurações.'}`, 502);
+      }
+      return new Response(upstream.body, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'X-Accel-Buffering': 'no'
+        }
+      });
+    }
+    return erro(`${ultimo || 'Gemini indisponível'} — tente de novo em alguns minutos.`, 503);
+  }
+
+  /* ============ Motor CLAUDE (API da Anthropic) ============ */
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
