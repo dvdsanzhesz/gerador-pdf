@@ -1,309 +1,368 @@
 /* ============================================================
-   CESS — Design system das apostilas (fiel aos PDFs de referência)
-   Página A4, Gelasio (títulos) + Inter (texto)
+   CESS — Renderizador de apostilas
+   Converte o JSON estruturado gerado pelo Claude em páginas A4
+   com o design system do CESS (apostila.css).
+   Módulo ES puro: sem dependências, funciona no navegador e no Node.
    ============================================================ */
 
-:root {
-  --ink: #272525;          /* texto corrido */
-  --ink-soft: #4b4b50;
-  --navy: #2F346A;         /* títulos */
-  --muted: #8f8f94;        /* rodapé */
-  --zebra: #F5F5F6;
-  --line: #ececee;
+const ACCENTS_PAGINA = ['#D9714E', '#B13E6F', '#B12C47', '#25798F'];
+
+const ICONS = {
+  alvo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
+  usuario: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>',
+  doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l13 7.5-13 7.5z"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3A8 8 0 1 1 21 12z"/></svg>',
+  coracao: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5S4 15 4 9.7A4.6 4.6 0 0 1 12 6.6a4.6 4.6 0 0 1 8 3.1C20 15 12 20.5 12 20.5z"/></svg>',
+  grafico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 16l4-5 3 3 5-7"/></svg>',
+  estrela: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8-4.2-4.1 5.9-.9z"/></svg>',
+  livro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 0-2 2z"/><path d="M20 17H6a2 2 0 0 0-2 2"/></svg>',
+  mais: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>',
+  menos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>',
+  alerta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4.5M12 17.5v.1"/></svg>',
+  marcador: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></svg>',
+  lampada: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 1 3.7 10.7c-.7.6-.7 1.3-.7 2.3h-6c0-1 0-1.7-.7-2.3A6 6 0 0 1 12 3z"/></svg>'
+};
+const CICLO_TOPO = ['mais', 'menos', 'alerta', 'usuario', 'estrela', 'doc'];
+const CICLO_FLUXO = ['play', 'usuario', 'check', 'doc', 'alvo', 'chat'];
+const CICLO_ILISTA = ['alvo', 'chat', 'coracao', 'check', 'grafico', 'estrela', 'livro', 'lampada'];
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-html, body { margin: 0; padding: 0; }
-body.apostila { background: #4b4e55; }
-
-/* ---------- Folha A4 ---------- */
-.sheet {
-  width: 210mm;
-  min-height: 297mm;
-  margin: 0 auto;
-  background: #fff;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  break-after: page;
-  page-break-after: always;
-  overflow: hidden;
-}
-@media screen {
-  .sheet { margin: 8mm auto; box-shadow: 0 3px 18px rgba(0,0,0,.28); border-radius: 1px; }
-}
-@media print {
-  body.apostila { background: #fff; }
-  .sheet { margin: 0 auto; box-shadow: none; min-height: 296.8mm; }
-}
-@page { size: A4; margin: 0; }
-
-.sheet-header {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: center;
-  padding: 4.6mm 0 3.4mm;
-}
-.sheet-header img { height: 9.2mm; width: auto; }
-
-.sheet-body { flex: 1 1 auto; padding: 1.5mm 13.5mm 5mm; display: flex; flex-direction: column; }
-/* mata as lacunas brancas:
-   - página cheia (--esp): distribui do topo ao pé, respiro no meio
-   - página semi-cheia (--semi): centraliza com respiros moderados entre os blocos
-   - página mínima: só centraliza */
-.pg-corpo { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
-.pg-corpo--esp { justify-content: space-between; padding-bottom: 6mm; }
-.pg-corpo--semi { justify-content: center; }
-.pg-corpo--semi .bloco { margin-bottom: 9.5mm; }
-.pg-corpo--semi .pg-titulo { margin-bottom: 8mm; }
-.pg-corpo--semi .pg-sub { margin: 6mm 0 5.5mm; }
-.pg-corpo > .bloco:last-child { margin-bottom: 0; }
-
-.sheet-footer {
-  flex: 0 0 auto;
-  padding: 3mm 10mm 4.6mm;
-  text-align: center;
-  font: 400 8pt/1.4 Inter, sans-serif;
-  color: var(--muted);
-}
-.sheet-footer .sep { margin: 0 1.2mm; }
-
-/* ---------- Capa ---------- */
-.sheet--capa { color: #fff; background: #22263f; }
-.capa-bg {
-  position: absolute; inset: 0;
-  background-size: cover; background-position: center;
-}
-.capa-overlay {
-  position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(23,21,19,.58) 0%, rgba(23,21,19,.66) 45%, rgba(23,21,19,.76) 100%);
-}
-.capa-foto {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  object-fit: cover;
-}
-.capa-gradiente {
-  position: absolute; inset: 0;
-  background:
-    radial-gradient(120mm 90mm at 50% 12%, rgba(236,142,93,.28), transparent 70%),
-    linear-gradient(165deg, #383e78 0%, #2F346A 38%, #1e2246 78%, #171a36 100%);
-}
-.sheet--capa .sheet-header, .sheet--capa .sheet-body, .sheet--capa .sheet-footer { position: relative; z-index: 2; }
-.sheet--capa .sheet-header { padding-top: 9mm; }
-.sheet--capa .sheet-header img { height: 10mm; }
-.sheet--capa .sheet-body {
-  display: flex; flex-direction: column; justify-content: center; align-items: center;
-  text-align: center; padding: 0 18mm 24mm;
-}
-.capa-titulo {
-  font: 400 34pt/1.4 Gelasio, Georgia, serif;
-  letter-spacing: .055em;
-  margin: 0 0 9mm;
-  text-wrap: balance;
-}
-.capa-sub {
-  font: 400 13pt/1.65 Inter, sans-serif;
-  color: rgba(255,255,255,.95);
-  max-width: 150mm;
-  margin: 0;
-}
-.capa-volume {
-  font: 600 10.5pt/1 Inter, sans-serif;
-  letter-spacing: .22em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,.85);
-  margin-bottom: 10mm;
-}
-.sheet--capa .sheet-footer { color: rgba(255,255,255,.8); }
-
-/* ---------- Tipografia ---------- */
-.pg-titulo {
-  font: 400 26pt/1.3 Gelasio, Georgia, serif;
-  color: var(--navy);
-  letter-spacing: .045em;
-  margin: 1.5mm 0 5.5mm;
-  text-wrap: balance;
-}
-.pg-sub {
-  font: 400 20pt/1.35 Gelasio, Georgia, serif;
-  color: var(--navy);
-  letter-spacing: .045em;
-  margin: 5mm 0 4mm;
-  text-wrap: balance;
-}
-.pg-titulo + .pg-sub { margin-top: 0; }
-
-.bloco { margin-bottom: 5.5mm; }
-.bloco:last-child { margin-bottom: 0; }
-
-p.par {
-  font: 400 11pt/1.62 Inter, sans-serif;
-  color: var(--ink);
-  margin: 0 0 3.4mm;
-  hyphens: auto;
-}
-p.par:last-child { margin-bottom: 0; }
-p.par strong { font-weight: 700; }
-.destaque-inline { color: var(--pg-accent, #D9714E); font-weight: 700; }
-
-/* ---------- Paleta ciclada ---------- */
-.c0 { --c-main: #EC8E5D; --c-border: #D27443; --c-title: #25798F; }
-.c1 { --c-main: #B13E6F; --c-border: #CA5788; --c-title: #B12C47; }
-.c2 { --c-main: #B12C47; --c-border: #CA4560; --c-title: #2F346A; }
-.c3 { --c-main: #25798F; --c-border: #3E92A8; --c-title: #25798F; }
-.c4 { --c-main: #484D83; --c-border: #2F346A; --c-title: #2F346A; }
-
-/* ---------- Grades ---------- */
-.grade { display: grid; gap: 5mm; align-items: stretch; }
-.grade.g2 { grid-template-columns: 1fr 1fr; }
-.grade.g3 { grid-template-columns: 1fr 1fr 1fr; }
-.grade.g4 { grid-template-columns: repeat(4, 1fr); }
-.duascol { display: grid; gap: 8mm; align-items: start; }
-.duascol.p11 { grid-template-columns: 1fr 1fr; }
-.duascol.p32 { grid-template-columns: 1.45fr 1fr; }
-.duascol.p23 { grid-template-columns: 1fr 1.45fr; }
-
-/* ---------- Cards ---------- */
-.card { border-radius: 2.6mm; background: #fff; }
-.card-titulo {
-  font: 400 14pt/1.35 Gelasio, Georgia, serif;
-  color: var(--c-title);
-  letter-spacing: .03em;
-  margin: 0 0 2.6mm;
-}
-.card-texto { font: 400 10.6pt/1.58 Inter, sans-serif; color: var(--ink); margin: 0; }
-.card-texto strong { font-weight: 700; }
-
-.card--borda { border: 0.4mm solid var(--c-border); border-left: 1.6mm solid var(--c-main); padding: 5.5mm 6mm; }
-.card--contorno { border: 0.4mm solid var(--c-border); padding: 5.5mm 6mm; }
-
-.card--topo { border: 0.4mm solid var(--c-border); overflow: hidden; padding: 0; }
-.card--topo .card-top {
-  background: var(--c-main); color: #fff; text-align: center;
-  font: 400 13pt/1 Gelasio, Georgia, serif; padding: 2.8mm 3mm;
-}
-.card--topo .card-top svg { width: 4.6mm; height: 4.6mm; display: inline-block; vertical-align: middle; }
-.card--topo .card-inner { padding: 5mm 6mm 5.5mm; }
-
-.card--barra { padding: 0; }
-.card--barra .barra { height: 2.5mm; border-radius: 1.25mm; background: var(--c-main); margin-bottom: 3.6mm; width: 100%; }
-
-.card--numerado { padding: 0; }
-.card--numerado .num { font: 400 10.5pt/1 Gelasio, Georgia, serif; letter-spacing: .18em; color: var(--ink); }
-.card--numerado .regua { height: 0.5mm; background: var(--c-main); margin: 1.8mm 0 3.2mm; }
-
-.card--citacao { border: 0.45mm solid var(--c-main); padding: 8mm 6.5mm 9mm; position: relative; }
-.card--citacao .q { font: 700 26pt/1 Gelasio, Georgia, serif; color: var(--c-main); position: absolute; }
-.card--citacao .q.a { top: 2mm; left: 4mm; }
-.card--citacao .q.b { bottom: -2mm; right: 4mm; }
-
-/* ---------- Estatísticas ---------- */
-.stats { display: grid; gap: 6.5mm; text-align: center; }
-.stats.g1 { grid-template-columns: 1fr; }
-.stats.g2 { grid-template-columns: 1fr 1fr; }
-.stats.g3 { grid-template-columns: 1fr 1fr 1fr; }
-.stats.g4 { grid-template-columns: repeat(4, 1fr); }
-.stat-valor { font: 400 29pt/1.15 Gelasio, Georgia, serif; color: var(--ink); }
-.stat-rotulo { font: 400 13pt/1.3 Gelasio, Georgia, serif; color: var(--ink); letter-spacing: .1em; margin-top: 2.2mm; }
-.stat-desc { font: 400 10.2pt/1.5 Inter, sans-serif; color: var(--ink-soft); margin-top: 2mm; }
-
-/* ---------- Timeline ---------- */
-.timeline { position: relative; padding: 1mm 0; }
-.timeline::before {
-  content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
-  width: 0.7mm; background: #e4e4e7; transform: translateX(-50%); border-radius: 1mm;
-}
-.tl-item { width: calc(50% - 11mm); position: relative; margin-bottom: 5.5mm; }
-.tl-item:last-child { margin-bottom: 0; }
-.tl-item--l { margin-right: auto; text-align: right; }
-.tl-item--r { margin-left: auto; text-align: left; }
-.tl-quadro {
-  content: ''; position: absolute; top: 0.4mm; width: 5.4mm; height: 4.6mm;
-  border-radius: 1.3mm; background: var(--c-main);
-}
-.tl-item--l .tl-quadro { right: -13.8mm; }
-.tl-item--r .tl-quadro { left: -13.8mm; }
-.tl-tra { position: absolute; top: 2.4mm; width: 5.6mm; height: 0.55mm; background: var(--c-main); }
-.tl-item--l .tl-tra { right: -7.2mm; }
-.tl-item--r .tl-tra { left: -7.2mm; }
-.tl-marco { font: 400 15pt/1.2 Gelasio, Georgia, serif; color: var(--ink); letter-spacing: .08em; margin-bottom: 1.8mm; }
-.tl-texto { font: 400 10.2pt/1.55 Inter, sans-serif; color: var(--ink); }
-.tl-texto strong { font-weight: 700; }
-
-/* ---------- Tabela ---------- */
-.tabela-wrap { border: 0.3mm solid var(--line); border-radius: 2.2mm; overflow: hidden; }
-table.tabela { width: 100%; border-collapse: collapse; }
-.tabela th {
-  font: 700 10.4pt/1.45 Inter, sans-serif; color: var(--ink);
-  text-align: left; padding: 3.6mm 4.5mm; background: #fff; border-bottom: 0.3mm solid #e4e4e8;
-}
-.tabela td {
-  font: 400 10.4pt/1.5 Inter, sans-serif; color: var(--ink);
-  padding: 3.6mm 4.5mm; vertical-align: top;
-}
-.tabela tbody tr:nth-child(odd) td { background: var(--zebra); }
-
-/* ---------- Callout destaque ---------- */
-.destaque {
-  display: flex; gap: 4mm; align-items: flex-start;
-  background: #F9E3D7; border-radius: 2.8mm; padding: 5.6mm 6.2mm;
-}
-.destaque svg { flex: 0 0 4.8mm; width: 4.8mm; height: 4.8mm; margin-top: 0.8mm; color: #B85C38; }
-.destaque .txt { font: 400 10.8pt/1.6 Inter, sans-serif; color: var(--ink); }
-
-/* ---------- Ponto-chave ---------- */
-.ponto-chave { border-left: 1.2mm solid #D9714E; padding: 0.8mm 0 0.8mm 5.2mm; }
-.ponto-chave .txt { font: 400 10.8pt/1.62 Inter, sans-serif; color: var(--ink); }
-.ponto-chave .txt strong { font-weight: 700; }
-
-/* ---------- Fluxo (setas) ---------- */
-.fluxo-setas { display: grid; gap: 1.6mm; }
-.fluxo-setas .seta {
-  height: 11.5mm; display: flex; align-items: center; justify-content: center;
-  background: var(--c-main); color: #fff;
-  clip-path: polygon(0 0, calc(100% - 5.5mm) 0, 100% 50%, calc(100% - 5.5mm) 100%, 0 100%, 5.5mm 50%);
-}
-.fluxo-setas .seta:first-child { clip-path: polygon(0 0, calc(100% - 5.5mm) 0, 100% 50%, calc(100% - 5.5mm) 100%, 0 100%); border-radius: 1.5mm 0 0 1.5mm; }
-.fluxo-setas .seta svg { width: 5mm; height: 5mm; }
-.fluxo-cols { display: grid; gap: 6mm; margin-top: 4.2mm; }
-.fluxo-titulo { font: 400 13.5pt/1.3 Gelasio, Georgia, serif; color: var(--ink); letter-spacing: .02em; margin: 0 0 2mm; }
-.fluxo-texto { font: 400 10.2pt/1.55 Inter, sans-serif; color: var(--ink); margin: 0; }
-
-/* ---------- Listas ---------- */
-ul.lista, ol.lista { margin: 0; padding-left: 5mm; }
-.lista li { font: 400 11pt/1.6 Inter, sans-serif; color: var(--ink); margin-bottom: 2.6mm; padding-left: 1mm; }
-.lista li:last-child { margin-bottom: 0; }
-.lista li::marker { color: var(--ink); }
-.lista li strong { font-weight: 700; }
-
-/* ---------- Lista com ícones ---------- */
-.ilista { display: grid; grid-template-columns: 1fr 1fr; gap: 5.5mm 9mm; }
-.ilista.g1 { grid-template-columns: 1fr; }
-.il-item { display: flex; gap: 4mm; align-items: flex-start; }
-.il-ico {
-  flex: 0 0 7.2mm; height: 7.2mm; border-radius: 1.9mm;
-  background: var(--c-main); display: flex; align-items: center; justify-content: center; color: #fff;
-}
-.il-ico svg { width: 4.2mm; height: 4.2mm; }
-.il-txt { font: 400 10.8pt/1.58 Inter, sans-serif; color: var(--ink); }
-.il-txt strong { font-weight: 700; }
-
-/* ---------- Foto ilustrativa ---------- */
-.foto { margin: 0; }
-.foto img {
-  display: block; width: 100%; height: 62mm;
-  object-fit: cover; border-radius: 2.8mm;
-}
-.foto-legenda {
-  font: 400 9.5pt/1.4 Inter, sans-serif;
-  color: var(--muted); text-align: center; margin-top: 2.2mm;
+/* markdown-lite: **negrito**, *itálico*, ==destaque colorido== */
+function md(s) {
+  let t = esc(s);
+  t = t.replace(/==([^=]+)==/g, '<span class="destaque-inline">$1</span>');
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[\s(>])\*([^*\n]+)\*(?=[\s.,;:!?)<]|$)/g, '$1<em>$2</em>');
+  return t;
 }
 
-/* Aviso de página cheia (apenas na tela, nunca imprime) */
-.aviso-overflow {
-  position: absolute; top: 4mm; right: 4mm; z-index: 5;
-  background: #B12C47; color: #fff; font: 600 8.5pt/1 Inter, sans-serif;
-  padding: 2mm 3mm; border-radius: 2mm;
+function pars(texto, cls = 'par') {
+  return String(texto == null ? '' : texto)
+    .split(/\n{2,}/)
+    .map(p => p.trim()).filter(Boolean)
+    .map(p => `<p class="${cls}">${md(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
 }
-@media print { .aviso-overflow { display: none !important; } }
+
+function cor(i) { return `c${i % 5}`; }
+function icone(nome) { return ICONS[nome] || ICONS.alvo; }
+
+/* Gera URL de foto por IA (Pollinations — grátis, sem chave). Seed estável por prompt. */
+function fotoURL(prompt, w, h) {
+  const p = `${String(prompt || '').slice(0, 400)}, professional photography, realistic, no text, no watermark`;
+  let seed = 0;
+  for (let i = 0; i < p.length; i++) seed = (seed * 31 + p.charCodeAt(i)) % 999983;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+}
+
+/* ---------------- blocos ---------------- */
+
+function bTexto(b) { return pars(b.texto); }
+
+function bSubtitulo(b) { return `<h2 class="pg-sub">${md(b.texto)}</h2>`; }
+
+function bLista(b) {
+  const tag = b.numerada ? 'ol' : 'ul';
+  const itens = (b.itens || []).map(i => `<li>${md(typeof i === 'string' ? i : i.texto)}</li>`).join('');
+  return `<${tag} class="lista">${itens}</${tag}>`;
+}
+
+function bCards(b) {
+  const estilo = b.estilo || 'borda';
+  const itens = b.itens || [];
+  const nc = b.colunas || (itens.length === 4 ? 2 : Math.min(3, Math.max(2, itens.length)));
+  const cards = itens.map((it, i) => {
+    const cc = cor(i);
+    const titulo = it.titulo ? `<h3 class="card-titulo">${md(it.titulo)}</h3>` : '';
+    const texto = it.texto ? `<div class="card-texto">${pars(it.texto, 'card-texto')}</div>` : '';
+    if (estilo === 'topo') {
+      const top = it.numero != null || b.numerado
+        ? esc(String(it.numero != null ? it.numero : i + 1))
+        : icone(it.icone || CICLO_TOPO[i % CICLO_TOPO.length]);
+      return `<div class="card card--topo ${cc}"><div class="card-top">${top}</div><div class="card-inner">${titulo}${texto}</div></div>`;
+    }
+    if (estilo === 'barra') {
+      return `<div class="card card--barra ${cc}"><div class="barra"></div>${titulo}${texto}</div>`;
+    }
+    if (estilo === 'numerado') {
+      const num = String(i + 1).padStart(2, '0');
+      return `<div class="card card--numerado ${cc}"><div class="num">${num}</div><div class="regua"></div>${titulo}${texto}</div>`;
+    }
+    if (estilo === 'citacao') {
+      return `<div class="card card--citacao ${cc}"><span class="q a">“</span>${titulo}${texto}<span class="q b">”</span></div>`;
+    }
+    if (estilo === 'contorno') {
+      return `<div class="card card--contorno ${cc}">${titulo}${texto}</div>`;
+    }
+    return `<div class="card card--borda ${cc}">${titulo}${texto}</div>`;
+  }).join('');
+  return `<div class="grade g${Math.min(4, Math.max(1, nc))}">${cards}</div>`;
+}
+
+function bStats(b) {
+  const itens = b.itens || [];
+  const n = Math.min(4, Math.max(1, b.colunas || itens.length));
+  const els = itens.map(it => `
+    <div class="stat">
+      <div class="stat-valor">${esc(it.valor)}</div>
+      <div class="stat-rotulo">${esc(it.rotulo || '')}</div>
+      ${it.descricao ? `<div class="stat-desc">${md(it.descricao)}</div>` : ''}
+    </div>`).join('');
+  return `<div class="stats g${n}">${els}</div>`;
+}
+
+function bTimeline(b) {
+  const itens = b.itens || [];
+  const els = itens.map((it, i) => {
+    const lado = i % 2 === 0 ? 'l' : 'r';
+    return `<div class="tl-item tl-item--${lado} ${cor(i)}">
+      <span class="tl-quadro"></span><span class="tl-tra"></span>
+      <div class="tl-marco">${esc(it.marco || '')}</div>
+      <div class="tl-texto">${md(it.texto || '')}</div>
+    </div>`;
+  }).join('');
+  return `<div class="timeline">${els}</div>`;
+}
+
+function bTabela(b) {
+  const head = (b.cabecalho || []).map(h => `<th>${md(h)}</th>`).join('');
+  const rows = (b.linhas || []).map(r =>
+    `<tr>${(r || []).map(c => `<td>${md(c)}</td>`).join('')}</tr>`).join('');
+  return `<div class="tabela-wrap"><table class="tabela"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function bDestaque(b) {
+  return `<div class="destaque">${icone('marcador')}<div class="txt">${md(b.texto || '')}</div></div>`;
+}
+
+function bPontoChave(b) {
+  const t = String(b.texto || '');
+  const pref = /^\s*ponto[- ]chave/i.test(t) ? md(t) : `<strong>Ponto-Chave:</strong> ${md(t)}`;
+  return `<div class="ponto-chave"><div class="txt">${pref}</div></div>`;
+}
+
+function bFluxo(b) {
+  const itens = (b.itens || []).slice(0, 5);
+  const n = itens.length || 1;
+  const setas = itens.map((it, i) =>
+    `<div class="seta ${cor(i)}">${icone(it.icone || CICLO_FLUXO[i % CICLO_FLUXO.length])}</div>`).join('');
+  const cols = itens.map(it =>
+    `<div><h4 class="fluxo-titulo">${md(it.titulo || '')}</h4><p class="fluxo-texto">${md(it.texto || '')}</p></div>`).join('');
+  return `<div class="fluxo">
+    <div class="fluxo-setas" style="grid-template-columns:repeat(${n},1fr)">${setas}</div>
+    <div class="fluxo-cols" style="grid-template-columns:repeat(${n},1fr)">${cols}</div>
+  </div>`;
+}
+
+function bListaIcones(b) {
+  const itens = b.itens || [];
+  const els = itens.map((it, i) => `
+    <div class="il-item">
+      <div class="il-ico ${cor(i)}">${icone((it && it.icone) || CICLO_ILISTA[i % CICLO_ILISTA.length])}</div>
+      <div class="il-txt">${md(typeof it === 'string' ? it : it.texto)}</div>
+    </div>`).join('');
+  return `<div class="ilista g${b.colunas === 1 ? 1 : 2}">${els}</div>`;
+}
+
+function bImagem(b) {
+  if (!b.prompt && !b.url) return '';
+  const src = b.url || fotoURL(b.prompt, 1200, 700);
+  const legenda = b.legenda ? `<figcaption class="foto-legenda">${md(b.legenda)}</figcaption>` : '';
+  return `<figure class="foto"><img src="${esc(src)}" alt="" onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
+}
+
+function bColunas(b) {
+  const cls = b.proporcao === '3-2' ? 'p32' : b.proporcao === '2-3' ? 'p23' : 'p11';
+  const esq = renderBlocos(b.esquerda || []);
+  const dir = renderBlocos(b.direita || []);
+  if (!esq.trim()) return dir;   // um lado vazio → o outro ocupa a largura toda
+  if (!dir.trim()) return esq;
+  return `<div class="duascol ${cls}"><div>${esq}</div><div>${dir}</div></div>`;
+}
+
+const BLOCOS = {
+  texto: bTexto,
+  subtitulo: bSubtitulo,
+  lista: bLista,
+  cards: bCards,
+  stats: bStats,
+  estatisticas: bStats,
+  timeline: bTimeline,
+  tabela: bTabela,
+  destaque: bDestaque,
+  ponto_chave: bPontoChave,
+  fluxo: bFluxo,
+  lista_icones: bListaIcones,
+  colunas: bColunas,
+  imagem: bImagem
+};
+
+function renderBlocos(blocos) {
+  return (blocos || []).map(b => {
+    try {
+      const fn = BLOCOS[b && b.tipo];
+      if (!fn) return '';
+      return `<div class="bloco bloco--${esc(b.tipo)}">${fn(b)}</div>`;
+    } catch (e) {
+      return '';
+    }
+  }).join('');
+}
+
+/* ---------------- páginas ---------------- */
+
+function renderRodape(rodape) {
+  const partes = String(rodape || '').split('|').map(s => s.trim()).filter(Boolean);
+  return partes.map(esc).join('<span class="sep">|</span>');
+}
+
+function renderCapa(data, cfg) {
+  // prioridade: foto enviada pelo usuário → foto por IA (imagem_capa) → foto por IA a partir do TÍTULO → gradiente CESS por baixo
+  const promptCapa = data.imagem_capa ||
+    `${data.titulo || 'educational course'}, warm brazilian educational scene related to this topic, people learning or professional practice environment, cinematic natural light`;
+  const srcFoto = cfg.capaImagem || fotoURL(promptCapa, 1080, 1500);
+  const fundo = `<div class="capa-gradiente"></div>` +
+    `<img class="capa-foto" src="${esc(srcFoto)}" alt="" onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
+  return `<section class="sheet sheet--capa">
+    ${fundo}
+    <div class="sheet-header"><img src="${esc(cfg.logoBranca)}" alt="CESS"></div>
+    <div class="sheet-body">
+      <h1 class="capa-titulo">${md(data.titulo || '')}</h1>
+      ${data.subtitulo ? `<p class="capa-sub">${md(data.subtitulo)}</p>` : ''}
+    </div>
+    <div class="sheet-footer">${renderRodape(cfg.rodape)}</div>
+  </section>`;
+}
+
+function renderPagina(pg, idx, cfg) {
+  const accent = ACCENTS_PAGINA[idx % ACCENTS_PAGINA.length];
+  // página cheia estica até o pé; semi-cheia centraliza com respiros moderados; mínima só centraliza
+  const peso = pesoPagina(pg);
+  const esp = (pg.blocos || []).length >= 2
+    ? (peso >= 290 ? ' pg-corpo--esp' : ' pg-corpo--semi')
+    : '';
+  return `<section class="sheet" style="--pg-accent:${accent}">
+    <div class="sheet-header"><img src="${esc(cfg.logo)}" alt="CESS"></div>
+    <div class="sheet-body">
+      <div class="pg-corpo${esp}">
+        ${pg.titulo ? `<h1 class="pg-titulo">${md(pg.titulo)}</h1>` : ''}
+        ${pg.subtitulo ? `<h2 class="pg-sub">${md(pg.subtitulo)}</h2>` : ''}
+        ${renderBlocos(pg.blocos)}
+      </div>
+    </div>
+    <div class="sheet-footer">${renderRodape(cfg.rodape)}</div>
+  </section>`;
+}
+
+/* ============================================================
+   Equilíbrio de páginas: mede o "peso" de cada página e funde
+   as leves com a seguinte — o respiro fica no meio, nunca sobra
+   meia página em branco.
+   ============================================================ */
+function palavras(s) { const t = String(s || '').trim(); return t ? t.split(/\s+/).length : 0; }
+
+function pesoBloco(b) {
+  if (!b || !b.tipo) return 0;
+  const itens = b.itens || [];
+  switch (b.tipo) {
+    case 'texto': return palavras(b.texto);
+    case 'subtitulo': return 12;
+    case 'lista': return itens.reduce((s, i) => s + palavras(typeof i === 'string' ? i : i.texto), 0) + itens.length * 6;
+    case 'cards': return itens.reduce((s, i) => s + palavras(i.titulo) * 2 + palavras(i.texto), 0) + itens.length * 25;
+    case 'stats':
+    case 'estatisticas': return itens.length * 35 + itens.reduce((s, i) => s + palavras(i.descricao), 0);
+    case 'timeline': return itens.reduce((s, i) => s + palavras(i.texto), 0) + itens.length * 20;
+    case 'tabela': return (b.linhas || []).flat().reduce((s, c) => s + palavras(c), 0) + (b.linhas || []).length * 18 + 20;
+    case 'destaque': return palavras(b.texto) + 18;
+    case 'ponto_chave': return palavras(b.texto) + 12;
+    case 'fluxo': return itens.reduce((s, i) => s + palavras(i.titulo) + palavras(i.texto), 0) + itens.length * 28;
+    case 'lista_icones': return itens.reduce((s, i) => s + palavras(typeof i === 'string' ? i : i.texto), 0) + itens.length * 12;
+    case 'imagem': return 170;
+    case 'colunas': {
+      const pe = (b.esquerda || []).reduce((s, x) => s + pesoBloco(x), 0);
+      const pd = (b.direita || []).reduce((s, x) => s + pesoBloco(x), 0);
+      return Math.max(pe, pd) + 20;
+    }
+    default: return 40;
+  }
+}
+
+function pesoPagina(pg) {
+  return 18 + (pg.subtitulo ? 12 : 0) + (pg.blocos || []).reduce((s, b) => s + pesoBloco(b), 0);
+}
+
+function equilibrarPaginas(paginas) {
+  const LEVE = 230;   // abaixo disso a página fica com buracos
+  const TETO = 430;   // acima disso corre risco de estourar a folha
+  const arr = paginas.map(p => Object.assign({}, p, { blocos: [...(p.blocos || [])] }));
+  const out = [];
+  let i = 0;
+  while (i < arr.length) {
+    let pg = arr[i];
+    // enquanto a página estiver leve e a próxima couber junto, funde
+    while (pesoPagina(pg) < LEVE && i + 1 < arr.length) {
+      const prox = arr[i + 1];
+      if (pesoPagina(pg) + pesoPagina(prox) > TETO) break;
+      pg.blocos = [
+        ...pg.blocos,
+        ...(prox.titulo ? [{ tipo: 'subtitulo', texto: prox.titulo }] : []),
+        ...(prox.blocos || [])
+      ];
+      arr.splice(i + 1, 1);
+    }
+    out.push(pg);
+    i++;
+  }
+  // última página muito leve → volta pra anterior, se couber
+  if (out.length >= 2) {
+    const ult = out[out.length - 1];
+    const ant = out[out.length - 2];
+    if (pesoPagina(ult) < LEVE * 0.8 && pesoPagina(ant) + pesoPagina(ult) <= TETO + 50) {
+      ant.blocos = [
+        ...ant.blocos,
+        ...(ult.titulo ? [{ tipo: 'subtitulo', texto: ult.titulo }] : []),
+        ...(ult.blocos || [])
+      ];
+      out.pop();
+    }
+  }
+  return out;
+}
+
+export function renderSheets(data, cfg) {
+  const paginas = equilibrarPaginas((data && data.paginas) || []);
+  return renderCapa(data || {}, cfg) + paginas.map((p, i) => renderPagina(p, i, cfg)).join('');
+}
+
+export function renderApostilaHTML(data, cfg = {}) {
+  const c = Object.assign({
+    logo: 'assets/logo-cess.png',
+    logoBranca: 'assets/logo-cess-branca.png',
+    rodape: 'Apostila criada por Centro Educacional Sete de Setembro | Proibida a reprodução ou distribuição',
+    capaImagem: null,
+    baseHref: ''
+  }, cfg);
+  const base = c.baseHref ? `<base href="${esc(c.baseHref)}">` : '';
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+${base}
+<title>${esc((data && data.titulo) || 'Apostila CESS')}</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="apostila.css">
+</head>
+<body class="apostila">
+${renderSheets(data, c)}
+</body>
+</html>`;
+}
+
+export default { renderApostilaHTML, renderSheets };
