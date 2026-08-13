@@ -15,11 +15,6 @@ export async function onRequestPost(context) {
       headers: { 'Content-Type': 'application/json; charset=utf-8' }
     });
 
-  const apiKey = context.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return erro('ANTHROPIC_API_KEY não configurada. No Cloudflare Pages: Settings → Variables and Secrets → adicione ANTHROPIC_API_KEY.', 500);
-  }
-
   let body;
   try { body = await context.request.json(); } catch { return erro('JSON inválido'); }
 
@@ -77,6 +72,10 @@ export async function onRequestPost(context) {
   }
 
   /* ============ Motor CLAUDE (API da Anthropic) ============ */
+  const apiKey = context.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return erro('O modo automático com Claude exige a ANTHROPIC_API_KEY no Cloudflare (Settings → Variables and Secrets). Dica: use o modo "Grátis — tudo aqui no site (Gemini)" no passo 4.', 500);
+  }
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
