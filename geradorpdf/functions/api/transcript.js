@@ -232,39 +232,51 @@ async function tryPiped(videoId) {
 /* ---------------- tentativa final: Gemini transcreve o áudio (vídeo SEM legenda) ---------------- */
 
 async function tryGemini(videoId, key) {
-  const modelos = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  const espera = ms => new Promise(r => setTimeout(r, ms));
   let erro = 'nenhum modelo Gemini disponível';
+
   for (const modelo of modelos) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(key)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { fileData: { fileUri: `https://www.youtube.com/watch?v=${videoId}` } },
-              { text: 'Transcreva integralmente a fala deste vídeo, em português, como texto corrido. Sem timestamps, sem títulos, sem comentários seus — apenas a transcrição completa.' }
-            ]
-          }],
-          generationConfig: { temperature: 0 }
-        }),
-        signal: tmSignal(240000)
-      });
-      if (res.status === 404) { erro = `modelo ${modelo} indisponível`; continue; }
+    // até 2 tentativas por modelo (com pausa quando estiver sobrecarregado)
+    for (let vez = 0; vez < 2; vez++) {
+      let res;
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(key)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { fileData: { fileUri: `https://www.youtube.com/watch?v=${videoId}` } },
+                { text: 'Transcreva integralmente a fala deste vídeo, em português, como texto corrido. Sem timestamps, sem títulos, sem comentários seus — apenas a transcrição completa.' }
+              ]
+            }],
+            generationConfig: { temperature: 0 }
+          }),
+          signal: tmSignal(240000)
+        });
+      } catch (e) {
+        erro = `falha de rede no Gemini (${e.message || e})`;
+        break; // tenta o próximo modelo
+      }
+
+      if (res.status === 404) { erro = `modelo ${modelo} indisponível`; break; } // próximo modelo
+      if (res.status === 503 || res.status === 429) {
+        erro = `Gemini lotado no momento (HTTP ${res.status}) — tente de novo em alguns minutos`;
+        await espera(3000);
+        continue; // re-tenta o mesmo modelo; se persistir, cai para o próximo
+      }
       if (!res.ok) {
         let msg = '';
         try { msg = (await res.json())?.error?.message || ''; } catch { /* sem detalhe */ }
         throw new Error(`Gemini HTTP ${res.status}${msg ? ' — ' + msg.slice(0, 160) : ''}`);
       }
+
       const data = await res.json();
       const text = (data?.candidates?.[0]?.content?.parts || [])
         .map(p => p.text || '').join(' ').replace(/\s{2,}/g, ' ').trim();
-      if (text.length < 40) throw new Error('a transcrição do Gemini veio vazia');
+      if (text.length < 40) { erro = `a transcrição do ${modelo} veio vazia`; break; }
       return { text, title: '', durationSeconds: 0, language: 'pt', auto: true };
-    } catch (e) {
-      erro = e.message || String(e);
-      if (/HTTP 404/.test(erro)) continue;
-      throw new Error(erro);
     }
   }
   throw new Error(erro);
