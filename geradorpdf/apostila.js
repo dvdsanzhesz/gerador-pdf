@@ -174,8 +174,9 @@ function bListaIcones(b) {
 function bImagem(b) {
   if (!b.prompt && !b.url) return '';
   const src = b.url || fotoURL(b.prompt, 1200, 700);
+  const attrIA = b.url ? '' : ` data-prompt="${esc(b.prompt)}" data-formato="pagina"`;
   const legenda = b.legenda ? `<figcaption class="foto-legenda">${md(b.legenda)}</figcaption>` : '';
-  return `<figure class="foto"><img src="${esc(src)}" alt="" onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
+  return `<figure class="foto"><img src="${esc(src)}" alt=""${attrIA} onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
 }
 
 function bColunas(b) {
@@ -228,8 +229,9 @@ function renderCapa(data, cfg) {
   const promptCapa = data.imagem_capa ||
     `${data.titulo || 'educational course'}, warm brazilian educational scene related to this topic, people learning or professional practice environment, cinematic natural light`;
   const srcFoto = cfg.capaImagem || fotoURL(promptCapa, 1080, 1500);
+  const attrIA = cfg.capaImagem ? '' : ` data-prompt="${esc(promptCapa)}" data-formato="capa"`;
   const fundo = `<div class="capa-gradiente"></div>` +
-    `<img class="capa-foto" src="${esc(srcFoto)}" alt="" onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
+    `<img class="capa-foto" src="${esc(srcFoto)}" alt=""${attrIA} onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
   return `<section class="sheet sheet--capa">
     ${fundo}
     <div class="sheet-header"><img src="${esc(cfg.logoBranca)}" alt="CESS"></div>
