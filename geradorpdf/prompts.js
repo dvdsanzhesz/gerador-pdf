@@ -10,6 +10,7 @@ FORMATO DA RESPOSTA — responda SOMENTE com um objeto JSON válido (sem cercas 
 {
   "titulo": "Título da apostila para a capa",
   "subtitulo": "Uma ou duas frases que resumem a jornada da apostila.",
+  "imagem_capa": "OBRIGATÓRIO: descrição EM INGLÊS de uma foto para a capa (cena fotográfica realista ligada ao tema, ambiente educacional/profissional acolhedor, luz natural; SEM texto, SEM logotipos). Ex.: 'warm classroom scene with a nutritionist explaining food groups to students, natural window light, professional photography'",
   "paginas": [
     { "titulo": "Título da página", "subtitulo": "opcional", "blocos": [ ...blocos... ] }
   ]
@@ -29,13 +30,14 @@ TIPOS DE BLOCO DISPONÍVEIS (use exatamente estes formatos):
 10. Fluxo com setas: {"tipo":"fluxo","itens":[{"titulo":"Antecedente (A)","texto":"O que acontece antes."}]} (2 a 4 etapas encadeadas)
 11. Lista com ícones: {"tipo":"lista_icones","itens":[{"texto":"Mensagem final importante."}]} (4 a 6 itens, para conclusões)
 12. Duas colunas: {"tipo":"colunas","proporcao":"1-1","esquerda":[...blocos...],"direita":[...blocos...]} (ex.: texto à esquerda e stats à direita)
+13. Imagem ilustrativa: {"tipo":"imagem","prompt":"photo description IN ENGLISH, realistic, no text","legenda":"legenda curta opcional em português"} — use com parcimônia (0 a 3 por apostila), apenas em páginas onde uma foto enriquece de verdade (abertura de módulo, contexto histórico, cena prática). Nunca em páginas já cheias.
 `;
 
 const ESTILO_DOC = `
 REGRAS EDITORIAIS (siga com rigor):
 - Escreva em português brasileiro, tom didático e profissional, como material autoral do curso. NUNCA mencione "vídeo", "aula gravada", "transcrição" ou "professor disse". Nunca use emojis.
 - Fidelidade: o conteúdo deve vir das aulas fornecidas. Não invente estatísticas, autores ou datas que não foram citados; você pode adicionar contextualização didática consolidada da área, sem contradizer as aulas.
-- 1 página = 1 assunto. Cada página tem no máximo ~380 palavras e no máximo 2 blocos "grandes" (cards/tabela/timeline/fluxo/stats). Deixe respiro visual, como uma apostila premium.
+- 1 página = 1 assunto. EQUILÍBRIO DE DENSIDADE (muito importante): cada página deve ficar entre ~220 e ~380 palavras, com 2 a 4 blocos. NUNCA crie páginas quase vazias (um parágrafo solto ou um bloco pequeno sozinho) — se um assunto rende pouco, funda-o com o assunto vizinho. Prefira MENOS páginas bem preenchidas a muitas páginas raladas. Também não abarrote: no máximo 2 blocos "grandes" (cards/tabela/timeline/fluxo/stats) por página.
 - Varie os componentes ao longo da apostila: alterne texto, cards, tabela, timeline, fluxo, stats, callout. Não repita o mesmo componente em 3 páginas seguidas.
 - Conteúdo que É processo/sequência → "fluxo"; história/evolução → "timeline"; comparação → "tabela"; números → "stats"; mitos/conceitos pareados → "cards"; síntese de seção → "ponto_chave".
 - Títulos de página: informativos e elegantes (ex.: "Desmistificando Conceitos Iniciais", "A Evolução Histórica da Compreensão do Autismo").
