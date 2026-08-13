@@ -182,6 +182,8 @@ function bColunas(b) {
   const cls = b.proporcao === '3-2' ? 'p32' : b.proporcao === '2-3' ? 'p23' : 'p11';
   const esq = renderBlocos(b.esquerda || []);
   const dir = renderBlocos(b.direita || []);
+  if (!esq.trim()) return dir;   // um lado vazio → o outro ocupa a largura toda
+  if (!dir.trim()) return esq;
   return `<div class="duascol ${cls}"><div>${esq}</div><div>${dir}</div></div>`;
 }
 
@@ -222,12 +224,12 @@ function renderRodape(rodape) {
 }
 
 function renderCapa(data, cfg) {
-  // prioridade: foto enviada pelo usuário → foto gerada por IA (imagem_capa) → gradiente CESS
-  let fundo = `<div class="capa-gradiente"></div>`;
-  const srcFoto = cfg.capaImagem || (data.imagem_capa ? fotoURL(data.imagem_capa, 1080, 1500) : null);
-  if (srcFoto) {
-    fundo += `<img class="capa-foto" src="${esc(srcFoto)}" alt="" onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
-  }
+  // prioridade: foto enviada pelo usuário → foto por IA (imagem_capa) → foto por IA a partir do TÍTULO → gradiente CESS por baixo
+  const promptCapa = data.imagem_capa ||
+    `${data.titulo || 'educational course'}, warm brazilian educational scene related to this topic, people learning or professional practice environment, cinematic natural light`;
+  const srcFoto = cfg.capaImagem || fotoURL(promptCapa, 1080, 1500);
+  const fundo = `<div class="capa-gradiente"></div>` +
+    `<img class="capa-foto" src="${esc(srcFoto)}" alt="" onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
   return `<section class="sheet sheet--capa">
     ${fundo}
     <div class="sheet-header"><img src="${esc(cfg.logoBranca)}" alt="CESS"></div>
@@ -241,10 +243,11 @@ function renderCapa(data, cfg) {
 
 function renderPagina(pg, idx, cfg) {
   const accent = ACCENTS_PAGINA[idx % ACCENTS_PAGINA.length];
+  const esp = (pg.blocos || []).length >= 2 ? ' pg-corpo--esp' : '';
   return `<section class="sheet" style="--pg-accent:${accent}">
     <div class="sheet-header"><img src="${esc(cfg.logo)}" alt="CESS"></div>
     <div class="sheet-body">
-      <div class="pg-corpo">
+      <div class="pg-corpo${esp}">
         ${pg.titulo ? `<h1 class="pg-titulo">${md(pg.titulo)}</h1>` : ''}
         ${pg.subtitulo ? `<h2 class="pg-sub">${md(pg.subtitulo)}</h2>` : ''}
         ${renderBlocos(pg.blocos)}
