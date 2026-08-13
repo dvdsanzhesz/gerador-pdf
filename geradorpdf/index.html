@@ -44,12 +44,12 @@
 
     <section class="cartao">
       <h2><span class="passo">2</span> Aulas do YouTube</h2>
-      <p class="dica">Cole o link de cada aula — <strong>só isso já basta</strong>: ao gerar, o site extrai as transcrições sozinho. Use as <strong>caixinhas</strong> pra marcar quais aulas entram na apostila. Se um vídeo não tiver legenda, abra “colar manualmente”.</p>
+      <p class="dica">Cole o link de cada aula — <strong>a transcrição começa sozinha</strong>, em fila (uma por vez, pra não estourar a cota). Use as <strong>caixinhas</strong> pra marcar quais aulas entram na apostila. Se falhar, o botão abaixo re-tenta as pendentes.</p>
       <label class="chk-todas"><input type="checkbox" id="chkTodas" checked> usar todas as aulas</label>
       <div id="listaAulas"></div>
       <div class="aulas-acoes">
         <button class="btn btn-suave" id="btnAddAula">+ Adicionar aula</button>
-        <button class="btn btn-suave" id="btnExtrairTodas">⇩ Extrair todas as transcrições</button>
+        <button class="btn btn-suave" id="btnExtrairTodas">↻ Re-tentar transcrições pendentes</button>
       </div>
     </section>
 
@@ -202,8 +202,7 @@
     <div class="aula-topo">
       <input type="checkbox" class="aula-usar" title="Usar esta aula na apostila" checked>
       <span class="aula-num"></span>
-      <input type="text" class="aula-url" placeholder="https://www.youtube.com/watch?v=...">
-      <button class="btn btn-suave aula-puxar" title="Extrair a transcrição do vídeo">Puxar transcrição</button>
+      <input type="text" class="aula-url" placeholder="Cole o link — a transcrição começa sozinha">
       <button class="btn btn-x aula-remover" title="Remover aula">×</button>
     </div>
     <div class="aula-status"></div>
