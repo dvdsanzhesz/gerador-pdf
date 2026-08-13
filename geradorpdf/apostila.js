@@ -243,7 +243,11 @@ function renderCapa(data, cfg) {
 
 function renderPagina(pg, idx, cfg) {
   const accent = ACCENTS_PAGINA[idx % ACCENTS_PAGINA.length];
-  const esp = (pg.blocos || []).length >= 2 ? ' pg-corpo--esp' : '';
+  // página cheia estica até o pé; semi-cheia centraliza com respiros moderados; mínima só centraliza
+  const peso = pesoPagina(pg);
+  const esp = (pg.blocos || []).length >= 2
+    ? (peso >= 290 ? ' pg-corpo--esp' : ' pg-corpo--semi')
+    : '';
   return `<section class="sheet" style="--pg-accent:${accent}">
     <div class="sheet-header"><img src="${esc(cfg.logo)}" alt="CESS"></div>
     <div class="sheet-body">
@@ -257,8 +261,83 @@ function renderPagina(pg, idx, cfg) {
   </section>`;
 }
 
+/* ============================================================
+   Equilíbrio de páginas: mede o "peso" de cada página e funde
+   as leves com a seguinte — o respiro fica no meio, nunca sobra
+   meia página em branco.
+   ============================================================ */
+function palavras(s) { const t = String(s || '').trim(); return t ? t.split(/\s+/).length : 0; }
+
+function pesoBloco(b) {
+  if (!b || !b.tipo) return 0;
+  const itens = b.itens || [];
+  switch (b.tipo) {
+    case 'texto': return palavras(b.texto);
+    case 'subtitulo': return 12;
+    case 'lista': return itens.reduce((s, i) => s + palavras(typeof i === 'string' ? i : i.texto), 0) + itens.length * 6;
+    case 'cards': return itens.reduce((s, i) => s + palavras(i.titulo) * 2 + palavras(i.texto), 0) + itens.length * 25;
+    case 'stats':
+    case 'estatisticas': return itens.length * 35 + itens.reduce((s, i) => s + palavras(i.descricao), 0);
+    case 'timeline': return itens.reduce((s, i) => s + palavras(i.texto), 0) + itens.length * 20;
+    case 'tabela': return (b.linhas || []).flat().reduce((s, c) => s + palavras(c), 0) + (b.linhas || []).length * 18 + 20;
+    case 'destaque': return palavras(b.texto) + 18;
+    case 'ponto_chave': return palavras(b.texto) + 12;
+    case 'fluxo': return itens.reduce((s, i) => s + palavras(i.titulo) + palavras(i.texto), 0) + itens.length * 28;
+    case 'lista_icones': return itens.reduce((s, i) => s + palavras(typeof i === 'string' ? i : i.texto), 0) + itens.length * 12;
+    case 'imagem': return 170;
+    case 'colunas': {
+      const pe = (b.esquerda || []).reduce((s, x) => s + pesoBloco(x), 0);
+      const pd = (b.direita || []).reduce((s, x) => s + pesoBloco(x), 0);
+      return Math.max(pe, pd) + 20;
+    }
+    default: return 40;
+  }
+}
+
+function pesoPagina(pg) {
+  return 18 + (pg.subtitulo ? 12 : 0) + (pg.blocos || []).reduce((s, b) => s + pesoBloco(b), 0);
+}
+
+function equilibrarPaginas(paginas) {
+  const LEVE = 230;   // abaixo disso a página fica com buracos
+  const TETO = 430;   // acima disso corre risco de estourar a folha
+  const arr = paginas.map(p => Object.assign({}, p, { blocos: [...(p.blocos || [])] }));
+  const out = [];
+  let i = 0;
+  while (i < arr.length) {
+    let pg = arr[i];
+    // enquanto a página estiver leve e a próxima couber junto, funde
+    while (pesoPagina(pg) < LEVE && i + 1 < arr.length) {
+      const prox = arr[i + 1];
+      if (pesoPagina(pg) + pesoPagina(prox) > TETO) break;
+      pg.blocos = [
+        ...pg.blocos,
+        ...(prox.titulo ? [{ tipo: 'subtitulo', texto: prox.titulo }] : []),
+        ...(prox.blocos || [])
+      ];
+      arr.splice(i + 1, 1);
+    }
+    out.push(pg);
+    i++;
+  }
+  // última página muito leve → volta pra anterior, se couber
+  if (out.length >= 2) {
+    const ult = out[out.length - 1];
+    const ant = out[out.length - 2];
+    if (pesoPagina(ult) < LEVE * 0.8 && pesoPagina(ant) + pesoPagina(ult) <= TETO + 50) {
+      ant.blocos = [
+        ...ant.blocos,
+        ...(ult.titulo ? [{ tipo: 'subtitulo', texto: ult.titulo }] : []),
+        ...(ult.blocos || [])
+      ];
+      out.pop();
+    }
+  }
+  return out;
+}
+
 export function renderSheets(data, cfg) {
-  const paginas = (data && data.paginas) || [];
+  const paginas = equilibrarPaginas((data && data.paginas) || []);
   return renderCapa(data || {}, cfg) + paginas.map((p, i) => renderPagina(p, i, cfg)).join('');
 }
 
