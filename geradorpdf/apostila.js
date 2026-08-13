@@ -54,6 +54,14 @@ function pars(texto, cls = 'par') {
 function cor(i) { return `c${i % 5}`; }
 function icone(nome) { return ICONS[nome] || ICONS.alvo; }
 
+/* Gera URL de foto por IA (Pollinations — grátis, sem chave). Seed estável por prompt. */
+function fotoURL(prompt, w, h) {
+  const p = `${String(prompt || '').slice(0, 400)}, professional photography, realistic, no text, no watermark`;
+  let seed = 0;
+  for (let i = 0; i < p.length; i++) seed = (seed * 31 + p.charCodeAt(i)) % 999983;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+}
+
 /* ---------------- blocos ---------------- */
 
 function bTexto(b) { return pars(b.texto); }
@@ -163,6 +171,13 @@ function bListaIcones(b) {
   return `<div class="ilista g${b.colunas === 1 ? 1 : 2}">${els}</div>`;
 }
 
+function bImagem(b) {
+  if (!b.prompt && !b.url) return '';
+  const src = b.url || fotoURL(b.prompt, 1200, 700);
+  const legenda = b.legenda ? `<figcaption class="foto-legenda">${md(b.legenda)}</figcaption>` : '';
+  return `<figure class="foto"><img src="${esc(src)}" alt="" onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
+}
+
 function bColunas(b) {
   const cls = b.proporcao === '3-2' ? 'p32' : b.proporcao === '2-3' ? 'p23' : 'p11';
   const esq = renderBlocos(b.esquerda || []);
@@ -183,7 +198,8 @@ const BLOCOS = {
   ponto_chave: bPontoChave,
   fluxo: bFluxo,
   lista_icones: bListaIcones,
-  colunas: bColunas
+  colunas: bColunas,
+  imagem: bImagem
 };
 
 function renderBlocos(blocos) {
@@ -206,9 +222,12 @@ function renderRodape(rodape) {
 }
 
 function renderCapa(data, cfg) {
-  const fundo = cfg.capaImagem
-    ? `<div class="capa-bg" style="background-image:url('${cfg.capaImagem}')"></div><div class="capa-overlay"></div>`
-    : `<div class="capa-gradiente"></div>`;
+  // prioridade: foto enviada pelo usuário → foto gerada por IA (imagem_capa) → gradiente CESS
+  let fundo = `<div class="capa-gradiente"></div>`;
+  const srcFoto = cfg.capaImagem || (data.imagem_capa ? fotoURL(data.imagem_capa, 1080, 1500) : null);
+  if (srcFoto) {
+    fundo += `<img class="capa-foto" src="${esc(srcFoto)}" alt="" onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
+  }
   return `<section class="sheet sheet--capa">
     ${fundo}
     <div class="sheet-header"><img src="${esc(cfg.logoBranca)}" alt="CESS"></div>
@@ -225,9 +244,11 @@ function renderPagina(pg, idx, cfg) {
   return `<section class="sheet" style="--pg-accent:${accent}">
     <div class="sheet-header"><img src="${esc(cfg.logo)}" alt="CESS"></div>
     <div class="sheet-body">
-      ${pg.titulo ? `<h1 class="pg-titulo">${md(pg.titulo)}</h1>` : ''}
-      ${pg.subtitulo ? `<h2 class="pg-sub">${md(pg.subtitulo)}</h2>` : ''}
-      ${renderBlocos(pg.blocos)}
+      <div class="pg-corpo">
+        ${pg.titulo ? `<h1 class="pg-titulo">${md(pg.titulo)}</h1>` : ''}
+        ${pg.subtitulo ? `<h2 class="pg-sub">${md(pg.subtitulo)}</h2>` : ''}
+        ${renderBlocos(pg.blocos)}
+      </div>
     </div>
     <div class="sheet-footer">${renderRodape(cfg.rodape)}</div>
   </section>`;
