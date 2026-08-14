@@ -7,6 +7,7 @@
  */
 import { onRequestPost as transcriptPost } from './functions/api/transcript.js';
 import { onRequestPost as generatePost } from './functions/api/generate.js';
+import { onRequestPost as gammaPost } from './functions/api/gamma.js';
 
 export default {
   async fetch(request, env) {
@@ -24,6 +25,9 @@ export default {
     }
     if (pathname === '/api/generate' && request.method === 'POST') {
       return generatePost({ request, env });
+    }
+    if (pathname === '/api/gamma' && request.method === 'POST') {
+      return gammaPost({ request, env });
     }
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ ok: false, error: 'Rota não encontrada' }), {
