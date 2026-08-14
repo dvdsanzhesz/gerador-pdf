@@ -54,6 +54,7 @@ body.apostila { background: #4b4e55; }
    - página mínima: só centraliza */
 .pg-corpo { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
 .pg-corpo--esp { justify-content: space-between; padding-bottom: 6mm; }
+.pg-corpo--foto { justify-content: flex-start; }
 .pg-corpo--semi { justify-content: center; }
 .pg-corpo--semi .bloco { margin-bottom: 9.5mm; }
 .pg-corpo--semi .pg-titulo { margin-bottom: 8mm; }
@@ -299,6 +300,16 @@ ul.lista, ol.lista { margin: 0; padding-left: 5mm; }
   display: block; width: 100%; height: 62mm;
   object-fit: cover; border-radius: 2.8mm;
 }
+/* tamanho proporcional ao espaço em branco que a foto vai preencher */
+.foto--g img { height: 68mm; }
+.foto--m img { height: 50mm; }
+.foto--p img { height: 34mm; }
+
+/* foto injetada para tapar lacuna: estica e come todo o espaço que sobrou na página */
+.bloco:has(.foto--fill) { flex: 1 1 auto; min-height: 0; display: flex; }
+.foto--fill { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; width: 100%; }
+/* flex-basis 0: a foto ocupa exatamente o espaço livre, sem empurrar o conteúdo */
+.foto--fill img { flex: 1 1 0; height: 0; min-height: 28mm; max-height: 150mm; }
 .foto-legenda {
   font: 400 9.5pt/1.4 Inter, sans-serif;
   color: var(--muted); text-align: center; margin-top: 2.2mm;
