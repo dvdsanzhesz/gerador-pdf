@@ -295,7 +295,17 @@ ul.lista, ol.lista { margin: 0; padding-left: 5mm; }
 .il-txt strong { font-weight: 700; }
 
 /* ---------- Foto ilustrativa ---------- */
-.foto { margin: 0; }
+/* painel decorativo do CESS por baixo: se a foto falhar ou demorar, NUNCA fica buraco branco */
+.foto {
+  margin: 0;
+  border-radius: 2.8mm;
+  background:
+    radial-gradient(90mm 60mm at 22% 18%, rgba(236,142,93,.30), transparent 65%),
+    radial-gradient(80mm 55mm at 80% 82%, rgba(177,62,111,.26), transparent 65%),
+    linear-gradient(135deg, #2F346A 0%, #3c4285 45%, #25798F 100%);
+  overflow: hidden;
+}
+.foto img.foto-falhou { opacity: 0; }
 .foto img {
   display: block; width: 100%; height: 62mm;
   object-fit: cover; border-radius: 2.8mm;
