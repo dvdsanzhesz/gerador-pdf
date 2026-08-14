@@ -713,48 +713,118 @@ function atualizarModoUI() {
 
 /* ---------------- fotos de alta qualidade via Gemini ---------------- */
 let modelosImagemCache = null;
+let ultimoErroImagem = '';
 
 async function modelosImagemGemini() {
   if (modelosImagemCache) return modelosImagemCache;
+  const conhecidos = [
+    'gemini-3-pro-image', 'gemini-3-flash-image', 'gemini-2.5-flash-image',
+    'gemini-flash-image-latest', 'gemini-2.0-flash-preview-image-generation',
+    'imagen-4.0-generate-001', 'imagen-3.0-generate-002'
+  ];
+  let descobertos = [];
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.gemini)}&pageSize=100`);
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.gemini)}&pageSize=200`);
     if (res.ok) {
       const data = await res.json();
-      const nomes = (data.models || [])
-        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      descobertos = (data.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).some(x => /generateContent|predict/i.test(x)))
         .map(m => String(m.name || '').replace(/^models\//, ''))
-        .filter(n => /image/i.test(n) && !/embedding|veo|video|edit/i.test(n));
-      const score = n => (/flash/i.test(n) ? 0 : 1) - (/latest/i.test(n) ? 0.5 : 0);
-      modelosImagemCache = [...new Set(nomes)].sort((a, b) => score(a) - score(b)).slice(0, 4);
+        .filter(n => /image|imagen/i.test(n) && !/veo|video|embedding|edit|upscale/i.test(n));
+    } else {
+      ultimoErroImagem = `não consegui listar os modelos (HTTP ${res.status})`;
     }
-  } catch { /* usa a lista fixa */ }
-  if (!modelosImagemCache || !modelosImagemCache.length) {
-    modelosImagemCache = ['gemini-2.5-flash-image', 'gemini-3-flash-image', 'gemini-flash-image-latest'];
+  } catch (e) {
+    ultimoErroImagem = `falha ao listar modelos (${e.message || e})`;
   }
+  const score = n => (/pro/i.test(n) ? 0 : /flash/i.test(n) ? 1 : 2) + (/preview/i.test(n) ? 0.5 : 0);
+  modelosImagemCache = [...new Set([...descobertos, ...conhecidos])].sort((a, b) => score(a) - score(b)).slice(0, 6);
   return modelosImagemCache;
 }
 
 async function gerarImagemGemini(prompt, aspecto) {
-  if (!config.gemini) return null;
-  const pedido = `${prompt}. Fotografia profissional realista, luz natural quente, composição elegante e limpa, sem nenhum texto, sem marca d'água, sem logotipos.`;
+  if (!config.gemini) { ultimoErroImagem = 'chave do Gemini não configurada'; return null; }
+  const pedido = `${prompt}. Fotografia editorial profissional, fotorrealista, luz natural suave, profundidade de campo, composição elegante, alta qualidade. Sem nenhum texto, sem marca d'água, sem logotipos.`;
   const modelos = await modelosImagemGemini();
+
   for (const modelo of modelos) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(config.gemini)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: pedido }] }],
-          generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspecto } }
-        })
-      });
-      if (!res.ok) continue; // 404 = modelo não existe; 429 = cota — tenta o próximo
-      const data = await res.json();
-      const parte = (data?.candidates?.[0]?.content?.parts || []).find(p => p.inlineData && p.inlineData.data);
-      if (parte) return `data:${parte.inlineData.mimeType || 'image/png'};base64,${parte.inlineData.data}`;
-    } catch { /* tenta o próximo modelo */ }
+    // Imagen usa outro endpoint (:predict)
+    if (/^imagen/i.test(modelo)) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:predict?key=${encodeURIComponent(config.gemini)}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            instances: [{ prompt: pedido }],
+            parameters: { sampleCount: 1, aspectRatio: aspecto, personGeneration: 'allow_adult' }
+          })
+        });
+        if (!res.ok) {
+          let m = ''; try { m = (await res.json())?.error?.message || ''; } catch { /* sem detalhe */ }
+          ultimoErroImagem = `${modelo}: HTTP ${res.status}${m ? ' — ' + m.slice(0, 120) : ''}`;
+          continue;
+        }
+        const data = await res.json();
+        const b64 = data?.predictions?.[0]?.bytesBase64Encoded;
+        if (b64) return `data:image/png;base64,${b64}`;
+        ultimoErroImagem = `${modelo}: resposta sem imagem`;
+      } catch (e) {
+        ultimoErroImagem = `${modelo}: ${e.message || e}`;
+      }
+      continue;
+    }
+
+    // Modelos Gemini de imagem — 1ª tentativa com aspecto, 2ª sem (alguns rejeitam o campo)
+    for (const comAspecto of [true, false]) {
+      try {
+        const generationConfig = comAspecto
+          ? { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspecto } }
+          : { responseModalities: ['IMAGE'] };
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(config.gemini)}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: pedido }] }], generationConfig })
+        });
+        if (!res.ok) {
+          let m = ''; try { m = (await res.json())?.error?.message || ''; } catch { /* sem detalhe */ }
+          ultimoErroImagem = `${modelo}: HTTP ${res.status}${m ? ' — ' + m.slice(0, 120) : ''}`;
+          if (res.status === 400 && comAspecto) continue;  // tenta sem o aspecto
+          break;                                           // 404/429/500 → próximo modelo
+        }
+        const data = await res.json();
+        const parte = (data?.candidates?.[0]?.content?.parts || []).find(p => p.inlineData && p.inlineData.data);
+        if (parte) return `data:${parte.inlineData.mimeType || 'image/png'};base64,${parte.inlineData.data}`;
+        ultimoErroImagem = `${modelo}: resposta sem imagem`;
+        break;
+      } catch (e) {
+        ultimoErroImagem = `${modelo}: ${e.message || e}`;
+        break;
+      }
+    }
   }
   return null;
+}
+
+/* Diagnóstico: descobre por que as fotos do Gemini não estão vindo */
+async function testarImagensGemini() {
+  const btn = $('#btnTestarImagem');
+  if (!config.gemini) { toast('Cole sua chave do Gemini primeiro.', true); return; }
+  btn.disabled = true; btn.textContent = 'Testando…';
+  ultimoErroImagem = '';
+  modelosImagemCache = null;
+  try {
+    const modelos = await modelosImagemGemini();
+    const url = await gerarImagemGemini('a friendly teacher explaining to students in a bright classroom', '16:9');
+    if (url) {
+      toast(`✔ Fotos do Gemini funcionando! Modelo usado com sucesso na lista: ${modelos.slice(0, 3).join(', ')}`, false, 9000);
+      const prev = $('#previewTesteImagem');
+      prev.src = url; prev.classList.remove('oculto');
+    } else {
+      toast(`✖ Não consegui gerar foto pelo Gemini. Motivo: ${ultimoErroImagem || 'desconhecido'}. Modelos tentados: ${modelos.join(', ')}`, true, 16000);
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = '🖼 Testar fotos do Gemini';
+  }
 }
 
 /* Troca as fotos de reserva pelas fotos bonitas do Gemini, direto no preview */
@@ -938,6 +1008,7 @@ function boot() {
   $('#btnPDF').addEventListener('click', salvarPDF);
   $('#btnEditar').addEventListener('click', alternarEdicao);
   $('#btnConfig').addEventListener('click', abrirConfig);
+  $('#btnTestarImagem').addEventListener('click', testarImagensGemini);
   $('#btnLimpar').addEventListener('click', () => {
     if (confirm('Começar um projeto novo? As aulas e apostilas geradas neste navegador serão apagadas.')) {
       localStorage.removeItem('cess_projeto_v1');
