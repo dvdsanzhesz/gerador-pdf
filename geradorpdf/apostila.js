@@ -173,10 +173,14 @@ function bListaIcones(b) {
 
 function bImagem(b) {
   if (!b.prompt && !b.url) return '';
-  const src = b.url || fotoURL(b.prompt, 1200, 700);
+  const porte = ['g', 'm', 'p'].includes(b.porte) ? b.porte : 'g';
+  const alturaPx = porte === 'g' ? 760 : porte === 'm' ? 620 : 460;
+  const src = b.url || fotoURL(b.prompt, 1280, alturaPx);
   const attrIA = b.url ? '' : ` data-prompt="${esc(b.prompt)}" data-formato="pagina"`;
   const legenda = b.legenda ? `<figcaption class="foto-legenda">${md(b.legenda)}</figcaption>` : '';
-  return `<figure class="foto"><img src="${esc(src)}" alt=""${attrIA} onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
+  // foto injetada para tapar lacuna: estica e ocupa exatamente o espaço que sobrou
+  const cls = `foto foto--${porte}${b.preenche ? ' foto--fill' : ''}`;
+  return `<figure class="${cls}"><img src="${esc(src)}" alt=""${attrIA} onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
 }
 
 function bColunas(b) {
@@ -245,11 +249,13 @@ function renderCapa(data, cfg) {
 
 function renderPagina(pg, idx, cfg) {
   const accent = ACCENTS_PAGINA[idx % ACCENTS_PAGINA.length];
-  // página cheia estica até o pé; semi-cheia centraliza com respiros moderados; mínima só centraliza
+  // com foto de preenchimento, ela absorve toda a sobra (sem respiros extras);
+  // senão: página cheia estica até o pé; semi-cheia centraliza; mínima só centraliza
   const peso = pesoPagina(pg);
-  const esp = (pg.blocos || []).length >= 2
-    ? (peso >= 290 ? ' pg-corpo--esp' : ' pg-corpo--semi')
-    : '';
+  const temFotoFill = (pg.blocos || []).some(b => b && b.tipo === 'imagem' && b.preenche);
+  const esp = temFotoFill
+    ? ' pg-corpo--foto'
+    : ((pg.blocos || []).length >= 2 ? (peso >= 290 ? ' pg-corpo--esp' : ' pg-corpo--semi') : '');
   return `<section class="sheet" style="--pg-accent:${accent}">
     <div class="sheet-header"><img src="${esc(cfg.logo)}" alt="CESS"></div>
     <div class="sheet-body">
@@ -286,7 +292,7 @@ function pesoBloco(b) {
     case 'ponto_chave': return palavras(b.texto) + 12;
     case 'fluxo': return itens.reduce((s, i) => s + palavras(i.titulo) + palavras(i.texto), 0) + itens.length * 28;
     case 'lista_icones': return itens.reduce((s, i) => s + palavras(typeof i === 'string' ? i : i.texto), 0) + itens.length * 12;
-    case 'imagem': return 170;
+    case 'imagem': return b.porte === 'p' ? 95 : b.porte === 'm' ? 135 : 175;
     case 'colunas': {
       const pe = (b.esquerda || []).reduce((s, x) => s + pesoBloco(x), 0);
       const pd = (b.direita || []).reduce((s, x) => s + pesoBloco(x), 0);
@@ -338,28 +344,27 @@ function equilibrarPaginas(paginas) {
   return out;
 }
 
-/* Se a IA não incluiu nenhuma foto interna, injeta 1-2 nas páginas mais leves */
-function garantirImagens(paginas, tituloApostila) {
-  const jaTem = paginas.some(p => (p.blocos || []).some(b => b && b.tipo === 'imagem'));
-  if (jaTem || paginas.length < 2) return paginas;
-  const candidatas = paginas
-    .map((p, i) => ({ i, peso: pesoPagina(p) }))
-    .filter(x => x.peso + 170 <= 420)
-    .sort((a, b) => a.peso - b.peso)
-    .slice(0, 2);
-  for (const { i } of candidatas) {
-    const pg = paginas[i];
-    const prompt = `${pg.titulo || tituloApostila || 'education'}, ${tituloApostila || ''}, realistic documentary photograph, warm natural light, no text`;
+/* Preenche as LACUNAS BRANCAS com foto: toda página que sobrar espaço ganha uma
+   imagem do tamanho exato do buraco (grande, média ou faixa). Página cheia não recebe. */
+function preencherLacunasComFoto(paginas, tituloApostila) {
+  const ALVO = 340;          // densidade de uma página bem preenchida
+  const MIN_FOTO = 70;       // buraco menor que isso não vale foto
+  for (const pg of paginas) {
     const blocos = pg.blocos || [];
-    pg.blocos = blocos.length
-      ? [blocos[0], { tipo: 'imagem', prompt }, ...blocos.slice(1)]
-      : [{ tipo: 'imagem', prompt }];
+    if (blocos.some(b => b && b.tipo === 'imagem')) continue; // a IA já pôs foto aqui
+    const falta = ALVO - pesoPagina(pg);
+    if (falta < MIN_FOTO) continue;                            // página cheia: sem foto
+    const porte = falta >= 175 ? 'g' : falta >= 130 ? 'm' : 'p';
+    const prompt = `${pg.titulo || tituloApostila || 'education'}${tituloApostila ? ', ' + tituloApostila : ''}, realistic documentary photograph, warm natural light, no text`;
+    const foto = { tipo: 'imagem', prompt, porte, preenche: true };
+    // entra logo após o primeiro bloco (título → texto → foto → resto)
+    pg.blocos = blocos.length ? [blocos[0], foto, ...blocos.slice(1)] : [foto];
   }
   return paginas;
 }
 
 export function renderSheets(data, cfg) {
-  const paginas = garantirImagens(
+  const paginas = preencherLacunasComFoto(
     equilibrarPaginas((data && data.paginas) || []),
     (data && data.titulo) || ''
   );
