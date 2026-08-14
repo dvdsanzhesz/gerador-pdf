@@ -54,12 +54,16 @@ function pars(texto, cls = 'par') {
 function cor(i) { return `c${i % 5}`; }
 function icone(nome) { return ICONS[nome] || ICONS.alvo; }
 
+/* Estilo fotográfico das imagens — evita rostos deformados (o maior defeito de IA)
+   e pede fotografia editorial de cena/objeto, que sai muito mais bonita. */
+const ESTILO_FOTO = 'editorial magazine photography, photorealistic, cinematic soft natural light, shallow depth of field f/2.8, muted warm color palette, elegant minimal composition, high detail, shot on 50mm lens, no visible faces, no text, no watermark, no logo, no illustration';
+
 /* Gera URL de foto por IA (Pollinations/Flux — grátis, sem chave). Seed estável por prompt. */
 function fotoURL(prompt, w, h) {
-  const p = `${String(prompt || '').slice(0, 380)}, professional editorial photography, photorealistic, cinematic soft natural light, shallow depth of field, high detail, elegant composition, no text, no watermark, no logo`;
+  const p = `${String(prompt || '').slice(0, 330)}, ${ESTILO_FOTO}`;
   let seed = 0;
   for (let i = 0; i < p.length; i++) seed = (seed * 31 + p.charCodeAt(i)) % 999983;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${w}&height=${h}&model=flux&enhance=true&nologo=true&seed=${seed}`;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${w}&height=${h}&model=flux&enhance=true&nologo=true&private=true&seed=${seed}`;
 }
 
 /* ---------------- blocos ---------------- */
@@ -171,22 +175,25 @@ function bListaIcones(b) {
   return `<div class="ilista g${b.colunas === 1 ? 1 : 2}">${els}</div>`;
 }
 
-function bImagem(b) {
+function bImagem(b, cfg) {
   if (!b.prompt && !b.url) return '';
   const porte = ['g', 'm', 'p'].includes(b.porte) ? b.porte : 'g';
   const alturaPx = porte === 'g' ? 760 : porte === 'm' ? 620 : 460;
-  const src = b.url || fotoURL(b.prompt, 1280, alturaPx);
-  const attrIA = b.url ? '' : ` data-prompt="${esc(b.prompt)}" data-formato="pagina"`;
+  // 1º) imagem do banco do usuário  2º) url fixa  3º) gerador (substituído pelo Gemini depois)
+  const daGaleria = b.galeria || null;
+  const src = daGaleria || b.url || fotoURL(b.prompt, 1280, alturaPx);
+  const attrIA = (daGaleria || b.url) ? '' : ` data-prompt="${esc(b.prompt)}" data-formato="pagina"`;
   const legenda = b.legenda ? `<figcaption class="foto-legenda">${md(b.legenda)}</figcaption>` : '';
   // foto injetada para tapar lacuna: estica e ocupa exatamente o espaço que sobrou
   const cls = `foto foto--${porte}${b.preenche ? ' foto--fill' : ''}`;
-  return `<figure class="${cls}"><img src="${esc(src)}" alt=""${attrIA} onerror="this.closest('.bloco').style.display='none'">${legenda}</figure>`;
+  // se a imagem falhar, some com ela e o painel decorativo do CESS assume — nunca fica buraco branco
+  return `<figure class="${cls}"><img src="${esc(src)}" alt=""${attrIA} onerror="this.classList.add('foto-falhou')">${legenda}</figure>`;
 }
 
-function bColunas(b) {
+function bColunas(b, cfg) {
   const cls = b.proporcao === '3-2' ? 'p32' : b.proporcao === '2-3' ? 'p23' : 'p11';
-  const esq = renderBlocos(b.esquerda || []);
-  const dir = renderBlocos(b.direita || []);
+  const esq = renderBlocos(b.esquerda || [], cfg);
+  const dir = renderBlocos(b.direita || [], cfg);
   if (!esq.trim()) return dir;   // um lado vazio → o outro ocupa a largura toda
   if (!dir.trim()) return esq;
   return `<div class="duascol ${cls}"><div>${esq}</div><div>${dir}</div></div>`;
@@ -209,12 +216,12 @@ const BLOCOS = {
   imagem: bImagem
 };
 
-function renderBlocos(blocos) {
+function renderBlocos(blocos, cfg) {
   return (blocos || []).map(b => {
     try {
       const fn = BLOCOS[b && b.tipo];
       if (!fn) return '';
-      return `<div class="bloco bloco--${esc(b.tipo)}">${fn(b)}</div>`;
+      return `<div class="bloco bloco--${esc(b.tipo)}">${fn(b, cfg)}</div>`;
     } catch (e) {
       return '';
     }
@@ -232,8 +239,9 @@ function renderCapa(data, cfg) {
   // prioridade: foto enviada pelo usuário → foto por IA (imagem_capa) → foto por IA a partir do TÍTULO → gradiente CESS por baixo
   const promptCapa = data.imagem_capa ||
     `${data.titulo || 'educational course'}, warm brazilian educational scene related to this topic, people learning or professional practice environment, cinematic natural light`;
-  const srcFoto = cfg.capaImagem || fotoURL(promptCapa, 1080, 1500);
-  const attrIA = cfg.capaImagem ? '' : ` data-prompt="${esc(promptCapa)}" data-formato="capa"`;
+  const daGaleria = (cfg.galeria && cfg.galeria.length) ? cfg.galeria[0] : null;
+  const srcFoto = cfg.capaImagem || daGaleria || fotoURL(promptCapa, 1080, 1500);
+  const attrIA = (cfg.capaImagem || daGaleria) ? '' : ` data-prompt="${esc(promptCapa)}" data-formato="capa"`;
   const fundo = `<div class="capa-gradiente"></div>` +
     `<img class="capa-foto" src="${esc(srcFoto)}" alt=""${attrIA} onerror="this.style.display='none'"><div class="capa-overlay"></div>`;
   return `<section class="sheet sheet--capa">
@@ -256,13 +264,15 @@ function renderPagina(pg, idx, cfg) {
   const esp = temFotoFill
     ? ' pg-corpo--foto'
     : ((pg.blocos || []).length >= 2 ? (peso >= 290 ? ' pg-corpo--esp' : ' pg-corpo--semi') : '');
+  const escala = escalaPagina(pg);
+  const estiloEscala = escala > 1 ? ` style="zoom:${escala}"` : '';
   return `<section class="sheet" style="--pg-accent:${accent}">
     <div class="sheet-header"><img src="${esc(cfg.logo)}" alt="CESS"></div>
     <div class="sheet-body">
-      <div class="pg-corpo${esp}">
+      <div class="pg-corpo${esp}"${estiloEscala}>
         ${pg.titulo ? `<h1 class="pg-titulo">${md(pg.titulo)}</h1>` : ''}
         ${pg.subtitulo ? `<h2 class="pg-sub">${md(pg.subtitulo)}</h2>` : ''}
-        ${renderBlocos(pg.blocos)}
+        ${renderBlocos(pg.blocos, cfg)}
       </div>
     </div>
     <div class="sheet-footer">${renderRodape(cfg.rodape)}</div>
@@ -346,27 +356,60 @@ function equilibrarPaginas(paginas) {
 
 /* Preenche as LACUNAS BRANCAS com foto: toda página que sobrar espaço ganha uma
    imagem do tamanho exato do buraco (grande, média ou faixa). Página cheia não recebe. */
-function preencherLacunasComFoto(paginas, tituloApostila) {
-  const ALVO = 340;          // densidade de uma página bem preenchida
-  const MIN_FOTO = 70;       // buraco menor que isso não vale foto
-  for (const pg of paginas) {
-    const blocos = pg.blocos || [];
-    if (blocos.some(b => b && b.tipo === 'imagem')) continue; // a IA já pôs foto aqui
-    const falta = ALVO - pesoPagina(pg);
-    if (falta < MIN_FOTO) continue;                            // página cheia: sem foto
-    const porte = falta >= 175 ? 'g' : falta >= 130 ? 'm' : 'p';
-    const prompt = `${pg.titulo || tituloApostila || 'education'}${tituloApostila ? ', ' + tituloApostila : ''}, realistic documentary photograph, warm natural light, no text`;
-    const foto = { tipo: 'imagem', prompt, porte, preenche: true };
-    // entra logo após o primeiro bloco (título → texto → foto → resto)
-    pg.blocos = blocos.length ? [blocos[0], foto, ...blocos.slice(1)] : [foto];
+/* Distribui POUCAS fotos, nos melhores lugares (nunca uma por página).
+   Regra: ~1 foto a cada 3 páginas, mínimo 2 e máximo 4 na apostila,
+   escolhendo as páginas com espaço sobrando (mas não as quase-vazias, que
+   a escala tipográfica já resolve). */
+function distribuirFotos(paginas, tituloApostila, galeria) {
+  const ALVO = 340;
+  const jaTemFoto = paginas.filter(p => (p.blocos || []).some(b => b && b.tipo === 'imagem')).length;
+  const cota = Math.max(0, Math.min(4, Math.max(2, Math.round(paginas.length / 3))) - jaTemFoto);
+  if (cota <= 0) return paginas;
+
+  const banco = (galeria || []).slice(1); // a 1ª do banco é da capa
+  const candidatas = paginas
+    .map((pg, i) => ({ i, falta: ALVO - pesoPagina(pg) }))
+    .filter(x => !(paginas[x.i].blocos || []).some(b => b && b.tipo === 'imagem'))
+    .filter(x => x.falta >= 90)                       // tem espaço de verdade
+    .sort((a, b) => b.falta - a.falta)                 // maiores lacunas primeiro
+    .slice(0, cota)
+    .sort((a, b) => a.i - b.i);                        // mantém a ordem das páginas
+
+  // garantia: apostila com 3+ páginas nunca fica sem nenhuma foto (entra uma faixa fina)
+  if (!candidatas.length && !jaTemFoto && paginas.length >= 3) {
+    const melhor = paginas
+      .map((pg, i) => ({ i, falta: ALVO - pesoPagina(pg) }))
+      .sort((a, b) => b.falta - a.falta)[0];
+    if (melhor) candidatas.push({ i: melhor.i, falta: Math.max(melhor.falta, 90) });
   }
+
+  candidatas.forEach(({ i, falta }, n) => {
+    const pg = paginas[i];
+    const blocos = pg.blocos || [];
+    const porte = falta >= 175 ? 'g' : falta >= 130 ? 'm' : 'p';
+    const tema = `${pg.titulo || tituloApostila || 'education'}${tituloApostila ? ' — ' + tituloApostila : ''}`;
+    const foto = { tipo: 'imagem', prompt: tema, porte, preenche: true };
+    if (banco.length) foto.galeria = banco[n % banco.length];
+    pg.blocos = blocos.length ? [blocos[0], foto, ...blocos.slice(1)] : [foto];
+  });
   return paginas;
 }
 
+/* Escala tipográfica: página leve respira mais (fonte e espaços maiores),
+   preenchendo a folha com o próprio texto — sem depender de imagem. */
+function escalaPagina(pg) {
+  const peso = pesoPagina(pg);
+  if ((pg.blocos || []).some(b => b && b.tipo === 'imagem')) return 1;
+  if (peso >= 300) return 1;
+  const s = Math.sqrt(320 / Math.max(peso, 120));
+  return Math.min(1.16, Math.max(1, Math.round(s * 100) / 100));
+}
+
 export function renderSheets(data, cfg) {
-  const paginas = preencherLacunasComFoto(
+  const paginas = distribuirFotos(
     equilibrarPaginas((data && data.paginas) || []),
-    (data && data.titulo) || ''
+    (data && data.titulo) || '',
+    cfg.galeria
   );
   return renderCapa(data || {}, cfg) + paginas.map((p, i) => renderPagina(p, i, cfg)).join('');
 }
@@ -377,6 +420,7 @@ export function renderApostilaHTML(data, cfg = {}) {
     logoBranca: 'assets/logo-cess-branca.png',
     rodape: 'Apostila criada por Centro Educacional Sete de Setembro | Proibida a reprodução ou distribuição',
     capaImagem: null,
+    galeria: [],
     baseHref: ''
   }, cfg);
   const base = c.baseHref ? `<base href="${esc(c.baseHref)}">` : '';
