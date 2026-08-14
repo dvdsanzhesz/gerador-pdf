@@ -147,9 +147,12 @@
     </label>
 
     <label class="campo">
-      <span>Transcrição por IA — chave do Gemini <em>(grátis, sem cartão: aistudio.google.com/apikey → "Criar chave de API" → cole aqui. Transcreve até vídeo SEM legenda, igual ao NotebookLM.)</em></span>
+      <span>Chave do Gemini <em>(grátis, sem cartão: aistudio.google.com/apikey → "Criar chave de API". Usada para transcrever vídeo sem legenda e gerar as fotos das apostilas.)</em></span>
       <input type="password" id="cfgGemini" placeholder="AIza…">
     </label>
+    <button class="btn btn-suave" type="button" id="btnTestarImagem">🖼 Testar fotos do Gemini</button>
+    <img id="previewTesteImagem" class="oculto teste-img" alt="">
+    <p class="dica">Se o teste falhar, a mensagem diz o motivo exato (cota, modelo indisponível etc.) — as fotos caem no gerador reserva enquanto isso.</p>
 
     <details class="cfg-avancado">
       <summary>Avançado — usar sem backend</summary>
